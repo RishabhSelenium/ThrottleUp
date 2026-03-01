@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "RideSathi",
+    "name": "ThrottleUp",
     "slug": "ridesathi-react",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -22,7 +22,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow RideSathi to use your location to auto-update your city."
+          "locationWhenInUsePermission": "Allow ThrottleUp to use your location to auto-update your city."
         }
       ],
       "expo-notifications"

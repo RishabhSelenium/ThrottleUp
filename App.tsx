@@ -528,7 +528,7 @@ const App = () => {
       id: `system-${Date.now()}`,
       type: 'message',
       senderId: 'system',
-      senderName: 'RideSathi',
+      senderName: 'ThrottleUp',
       senderAvatar: avatarFallback,
       content,
       timestamp: new Date().toISOString(),
@@ -1014,8 +1014,8 @@ const App = () => {
   const handleShareApp = async () => {
     try {
       await Share.share({
-        title: 'RideSathi',
-        message: 'Join me on RideSathi - The community grid for motorcycle explorers.'
+        title: 'ThrottleUp',
+        message: 'Join me on ThrottleUp - The community grid for motorcycle explorers.'
       });
     } catch {
       pushSystemNotification('Unable to open share sheet right now.');
@@ -1040,7 +1040,7 @@ const App = () => {
         <ExpoStatusBar style="light" translucent={false} backgroundColor={TOKENS.dark.bg} />
         <View style={styles.centered}>
           <MaterialCommunityIcons name="bike-fast" size={46} color={TOKENS.dark.primary} />
-          <Text style={[styles.brandTitle, { marginTop: 12, color: TOKENS.dark.text }]}>RideSathi</Text>
+          <Text style={[styles.brandTitle, { marginTop: 12, color: TOKENS.dark.text }]}>ThrottleUp</Text>
           <Text style={[styles.mutedSmall, { marginTop: 6, color: TOKENS.dark.muted }]}>Loading workspace...</Text>
         </View>
       </SafeAreaView>
@@ -1057,7 +1057,7 @@ const App = () => {
               <View style={[styles.brandIconWrap, { backgroundColor: t.primary }]}>
                 <MaterialCommunityIcons name="flash" size={18} color="#fff" />
               </View>
-              <Text style={[styles.brandTitle, { color: t.text }]}>RideSathi</Text>
+              <Text style={[styles.brandTitle, { color: t.text }]}>ThrottleUp</Text>
             </View>
             <View style={styles.headerActions}>
               <TouchableOpacity

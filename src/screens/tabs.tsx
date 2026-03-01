@@ -29,7 +29,7 @@ export const SplashScreen = ({ theme }: { theme: Theme }) => {
         <View style={[styles.splashIcon, { backgroundColor: t.primary }]}> 
           <MaterialCommunityIcons name="flash" size={56} color="#fff" />
         </View>
-        <Text style={[styles.splashBrand, { color: t.text }]}>RideSathi</Text>
+        <Text style={[styles.splashBrand, { color: t.text }]}>ThrottleUp</Text>
         <Text style={[styles.splashSubtitle, { color: t.primary }]}>COMMUNITY GRID</Text>
       </View>
     </SafeAreaView>

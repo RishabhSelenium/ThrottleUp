@@ -1,6 +1,6 @@
-# RideSathi React Native
+# ThrottleUp React Native
 
-React Native (Expo) migration of the original RideSathi web prototype.
+React Native (Expo) migration of the original ThrottleUp web prototype.
 
 ## Included in this migration
 
