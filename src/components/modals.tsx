@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { styles } from '../app/styles';
 import {
@@ -28,7 +29,7 @@ import {
   formatDay
 } from '../app/ui';
 import { Badge, LabeledInput, SelectorRow } from './common';
-import { Conversation, HelpPost, MapPoint, Notification, RidePost, RideType, RideVisibility, User } from '../types';
+import { Conversation, HelpPost, MapPoint, Notification, RidePost, RideType, RideVisibility, Squad, User } from '../types';
 
 type RouteCoordinate = {
   latitude: number;
@@ -255,13 +256,24 @@ export const NotificationsOverlay = ({
   theme: Theme;
 }) => {
   const t = TOKENS[theme];
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={styles.modalBackdrop}>
+      <View style={styles.modalBackdrop}>
         <Pressable style={styles.modalScrim} onPress={onClose} />
-        <View style={[styles.sideSheet, { backgroundColor: t.bg, borderLeftColor: t.border }]}> 
-          <View style={[styles.modalHeader, { borderBottomColor: t.border }]}> 
+        <View
+          style={[
+            styles.sideSheet,
+            {
+              backgroundColor: t.bg,
+              borderLeftColor: t.border,
+              paddingTop: Math.max(insets.top, 8),
+              paddingBottom: Math.max(insets.bottom, 8)
+            }
+          ]}
+        >
+          <View style={[styles.modalHeader, { borderBottomColor: t.border }]}>
             <View style={styles.rowAligned}>
               <MaterialCommunityIcons name="bell-outline" size={20} color={t.primary} />
               <Text style={[styles.modalTitle, { color: t.text }]}>Alert Center</Text>
@@ -271,7 +283,7 @@ export const NotificationsOverlay = ({
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={styles.listWrap}>
+          <ScrollView contentContainerStyle={styles.notificationListWrap}>
             {notifications.length === 0 ? (
               <View style={styles.emptyWrap}>
                 <MaterialCommunityIcons name="bell-off-outline" size={40} color={t.muted} />
@@ -279,7 +291,7 @@ export const NotificationsOverlay = ({
               </View>
             ) : (
               notifications.map((n) => (
-                <View key={n.id} style={[styles.card, { backgroundColor: t.card, borderColor: n.read ? t.border : `${t.primary}66` }]}> 
+                <View key={n.id} style={[styles.card, { backgroundColor: t.card, borderColor: n.read ? t.border : `${t.primary}66` }]}>
                   <View style={styles.rowAlignedTop}>
                     <TouchableOpacity onPress={() => onMarkRead(n.id)}>
                       <Image source={{ uri: n.senderAvatar || avatarFallback }} style={styles.avatarSmall} />
@@ -316,14 +328,14 @@ export const NotificationsOverlay = ({
           </ScrollView>
 
           {notifications.length > 0 && (
-            <View style={[styles.modalFooter, { borderTopColor: t.border }]}> 
+            <View style={[styles.modalFooter, { borderTopColor: t.border }]}>
               <TouchableOpacity style={[styles.ghostButton, { borderColor: t.border, backgroundColor: t.subtle }]} onPress={onClear}>
                 <Text style={[styles.ghostButtonText, { color: t.muted }]}>Clear All</Text>
               </TouchableOpacity>
             </View>
           )}
         </View>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 };
@@ -350,8 +362,8 @@ export const ChatRoomScreen = ({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}> 
-        <View style={[styles.modalHeader, { borderBottomColor: t.border }]}> 
+      <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}>
+        <View style={[styles.modalHeader, { borderBottomColor: t.border }]}>
           <View style={styles.rowAligned}>
             <TouchableOpacity onPress={onClose} style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <MaterialCommunityIcons name="arrow-left" size={20} color={t.text} />
@@ -395,7 +407,7 @@ export const ChatRoomScreen = ({
         </ScrollView>
 
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.messageComposer, { borderTopColor: t.border, backgroundColor: t.surface }]}> 
+          <View style={[styles.messageComposer, { borderTopColor: t.border, backgroundColor: t.surface }]}>
             <TextInput
               style={[styles.input, styles.flex1, { backgroundColor: t.subtle, borderColor: t.border, color: t.text }]}
               placeholder="Type a message..."
@@ -537,7 +549,7 @@ export const CreateRideModal = ({
         <SafeAreaView style={styles.modalBackdrop}>
           <Pressable style={styles.modalScrim} onPress={onClose} />
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <View style={[styles.bottomSheet, { backgroundColor: t.surface, borderTopColor: t.primary }]}> 
+            <View style={[styles.bottomSheet, { backgroundColor: t.surface, borderTopColor: t.primary }]}>
               <View style={styles.rowBetween}>
                 <Text style={[styles.modalTitle, { color: t.text }]}>Create Ride</Text>
                 <TouchableOpacity onPress={onClose}>
@@ -646,8 +658,8 @@ export const CreateRideModal = ({
       </Modal>
 
       <Modal visible={isStopPickerOpen} animationType="slide" onRequestClose={() => setIsStopPickerOpen(false)}>
-        <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}> 
-          <View style={[styles.modalHeader, { borderBottomColor: t.border }]}> 
+        <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}>
+          <View style={[styles.modalHeader, { borderBottomColor: t.border }]}>
             <View style={styles.rowAligned}>
               <TouchableOpacity
                 onPress={() => setIsStopPickerOpen(false)}
@@ -778,7 +790,7 @@ export const CreateHelpModal = ({
       <SafeAreaView style={styles.modalBackdrop}>
         <Pressable style={styles.modalScrim} onPress={onClose} />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.bottomSheet, { backgroundColor: t.surface, borderTopColor: TOKENS[theme].blue }]}> 
+          <View style={[styles.bottomSheet, { backgroundColor: t.surface, borderTopColor: TOKENS[theme].blue }]}>
             <View style={styles.rowBetween}>
               <Text style={[styles.modalTitle, { color: t.text }]}>Create Help Request</Text>
               <TouchableOpacity onPress={onClose}>
@@ -887,7 +899,7 @@ export const EditProfileModal = ({
       <SafeAreaView style={styles.modalBackdrop}>
         <Pressable style={styles.modalScrim} onPress={onClose} />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.bottomSheet, { backgroundColor: t.surface, borderTopColor: t.primary }]}> 
+          <View style={[styles.bottomSheet, { backgroundColor: t.surface, borderTopColor: t.primary }]}>
             <View style={styles.rowBetween}>
               <Text style={[styles.modalTitle, { color: t.text }]}>Edit Profile</Text>
               <TouchableOpacity onPress={onClose}>
@@ -985,8 +997,8 @@ export const RideDetailScreen = ({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}> 
-        <View style={[styles.modalHeader, { borderBottomColor: t.border }]}> 
+      <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}>
+        <View style={[styles.modalHeader, { borderBottomColor: t.border }]}>
           <View style={styles.rowAligned}>
             <TouchableOpacity onPress={onClose} style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <MaterialCommunityIcons name="arrow-left" size={20} color={t.text} />
@@ -1006,7 +1018,7 @@ export const RideDetailScreen = ({
         </View>
 
         <ScrollView contentContainerStyle={styles.listWrap}>
-          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
             <View style={styles.rowBetween}>
               <Badge color="orange" theme={theme}>
                 {ride.type}
@@ -1039,7 +1051,7 @@ export const RideDetailScreen = ({
               </View>
             </TouchableOpacity>
 
-            <View style={[styles.routePreview, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.routePreview, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <Text style={[styles.inputLabel, { color: t.muted }]}>Route Details</Text>
               <Text style={[styles.bodyText, { color: t.text }]}>{ride.route}</Text>
             </View>
@@ -1107,7 +1119,7 @@ export const RideDetailScreen = ({
             )}
           </View>
 
-          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
             <Text style={[styles.cardHeader, { color: t.muted }]}>RIDERS ({participants.length})</Text>
             <View style={styles.wrapRow}>
               {participants.map((u) => (
@@ -1120,10 +1132,10 @@ export const RideDetailScreen = ({
           </View>
 
           {isCreator && requestUsers.length > 0 && (
-            <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+            <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
               <Text style={[styles.cardHeader, { color: t.primary }]}>JOIN REQUESTS ({requestUsers.length})</Text>
               {requestUsers.map((u) => (
-                <View key={u.id} style={[styles.requestRow, { borderColor: t.border }]}> 
+                <View key={u.id} style={[styles.requestRow, { borderColor: t.border }]}>
                   <View style={styles.rowAligned}>
                     <Image source={{ uri: u.avatar || avatarFallback }} style={styles.avatarSmall} />
                     <View>
@@ -1151,7 +1163,7 @@ export const RideDetailScreen = ({
           )}
         </ScrollView>
 
-        <View style={[styles.modalFooter, { borderTopColor: t.border, backgroundColor: t.surface }]}> 
+        <View style={[styles.modalFooter, { borderTopColor: t.border, backgroundColor: t.surface }]}>
           {isCreator ? (
             <TouchableOpacity
               style={[styles.dangerButton, { borderColor: TOKENS[theme].red }]}
@@ -1166,12 +1178,12 @@ export const RideDetailScreen = ({
               <Text style={[styles.dangerButtonText, { color: TOKENS[theme].red }]}>Cancel Ride</Text>
             </TouchableOpacity>
           ) : isJoined ? (
-            <View style={[styles.statusStrip, { borderColor: TOKENS[theme].green, backgroundColor: `${TOKENS[theme].green}22` }]}> 
+            <View style={[styles.statusStrip, { borderColor: TOKENS[theme].green, backgroundColor: `${TOKENS[theme].green}22` }]}>
               <MaterialCommunityIcons name="account-check-outline" size={18} color={TOKENS[theme].green} />
               <Text style={[styles.statusStripText, { color: TOKENS[theme].green }]}>You are joined</Text>
             </View>
           ) : isPending ? (
-            <View style={[styles.statusStrip, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.statusStrip, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <MaterialCommunityIcons name="clock-outline" size={18} color={t.muted} />
               <Text style={[styles.statusStripText, { color: t.muted }]}>Request sent</Text>
             </View>
@@ -1223,8 +1235,8 @@ export const HelpDetailScreen = ({
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}> 
-        <View style={[styles.modalHeader, { borderBottomColor: t.border }]}> 
+      <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}>
+        <View style={[styles.modalHeader, { borderBottomColor: t.border }]}>
           <View style={styles.rowAligned}>
             <TouchableOpacity onPress={onClose} style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <MaterialCommunityIcons name="arrow-left" size={20} color={t.text} />
@@ -1238,7 +1250,7 @@ export const HelpDetailScreen = ({
         </View>
 
         <ScrollView contentContainerStyle={styles.listWrap}>
-          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
             <View style={styles.rowBetween}>
               <Badge color={post.resolved ? 'green' : 'blue'} theme={theme}>
                 {post.resolved ? 'Resolved' : post.category}
@@ -1248,7 +1260,7 @@ export const HelpDetailScreen = ({
 
             <Text style={[styles.cardTitle, { color: t.text }]}>{post.title}</Text>
 
-            <View style={[styles.routePreview, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.routePreview, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <Text style={[styles.inputLabel, { color: t.muted }]}>Affected Machine</Text>
               <Text style={[styles.bodyText, { color: t.text }]}>{post.bikeModel}</Text>
             </View>
@@ -1263,7 +1275,7 @@ export const HelpDetailScreen = ({
               </View>
             </TouchableOpacity>
 
-            <View style={[styles.routePreview, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.routePreview, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <Text style={[styles.inputLabel, { color: t.muted }]}>Details</Text>
               <Text style={[styles.bodyText, { color: t.text }]}>{post.description}</Text>
             </View>
@@ -1271,13 +1283,13 @@ export const HelpDetailScreen = ({
             {post.image && <Image source={{ uri: post.image }} style={styles.helpImage} resizeMode="cover" />}
           </View>
 
-          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
             <Text style={[styles.cardHeader, { color: t.muted }]}>REPLIES ({post.replies.length})</Text>
             {post.replies.length === 0 ? (
               <Text style={[styles.bodyText, { color: t.muted }]}>No replies yet.</Text>
             ) : (
               post.replies.map((reply) => (
-                <View key={reply.id} style={[styles.replyCard, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+                <View key={reply.id} style={[styles.replyCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
                   <View style={styles.rowBetween}>
                     <View style={styles.rowAligned}>
                       <Image source={{ uri: reply.creatorAvatar || avatarFallback }} style={styles.avatarTiny} />
@@ -1293,7 +1305,7 @@ export const HelpDetailScreen = ({
         </ScrollView>
 
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.modalFooter, { borderTopColor: t.border, backgroundColor: t.surface }]}> 
+          <View style={[styles.modalFooter, { borderTopColor: t.border, backgroundColor: t.surface }]}>
             {isCreator ? (
               <TouchableOpacity
                 disabled={post.resolved}
@@ -1363,7 +1375,7 @@ export const UserProfileModal = ({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <SafeAreaView style={styles.modalBackdrop}>
         <Pressable style={styles.modalScrim} onPress={onClose} />
-        <View style={[styles.profileSheet, { backgroundColor: t.bg, borderTopColor: t.primary }]}> 
+        <View style={[styles.profileSheet, { backgroundColor: t.bg, borderTopColor: t.primary }]}>
           <View style={styles.profileCoverWrap}>
             <Image
               source={{ uri: 'https://images.unsplash.com/photo-1558981403-c5f9899a28bc?auto=format&fit=crop&q=80&w=800' }}
@@ -1410,25 +1422,25 @@ export const UserProfileModal = ({
             </View>
 
             <View style={styles.profileStatsRow}>
-              <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+              <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <Text style={[styles.profileStatValue, { color: t.text }]}>{user.friends.length}</Text>
                 <Text style={[styles.profileStatLabel, { color: t.muted }]}>Squad</Text>
               </View>
-              <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+              <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <Text style={[styles.profileStatValue, { color: t.text }]}>{userRides.length}</Text>
                 <Text style={[styles.profileStatLabel, { color: t.muted }]}>Missions</Text>
               </View>
-              <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+              <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <Text style={[styles.profileStatValue, { color: t.text }]}>{user.garage.length}</Text>
                 <Text style={[styles.profileStatLabel, { color: t.muted }]}>Machines</Text>
               </View>
             </View>
 
-            <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+            <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
               <Text style={[styles.cardHeader, { color: t.muted }]}>GARAGE</Text>
               <View style={styles.wrapRow}>
                 {user.garage.map((bike, idx) => (
-                  <View key={`${bike}-${idx}`} style={[styles.pillTag, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+                  <View key={`${bike}-${idx}`} style={[styles.pillTag, { borderColor: t.border, backgroundColor: t.subtle }]}>
                     <Text style={[styles.pillTagText, { color: t.text }]}>{bike}</Text>
                   </View>
                 ))}
@@ -1436,17 +1448,234 @@ export const UserProfileModal = ({
             </View>
 
             <View style={styles.gridTwo}>
-              <View style={[styles.infoTile, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+              <View style={[styles.infoTile, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <Text style={[styles.inputLabel, { color: t.muted }]}>Style</Text>
                 <Text style={[styles.bodyText, { color: t.text }]}>{user.style}</Text>
               </View>
-              <View style={[styles.infoTile, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+              <View style={[styles.infoTile, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <Text style={[styles.inputLabel, { color: t.muted }]}>Window</Text>
                 <Text style={[styles.bodyText, { color: t.text }]}>{user.typicalRideTime}</Text>
               </View>
             </View>
           </ScrollView>
         </View>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+export const CreateSquadModal = ({
+  visible,
+  onClose,
+  onSubmit,
+  theme
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSubmit: (data: { name: string; description: string; rideStyle: string }) => void;
+  theme: Theme;
+}) => {
+  const t = TOKENS[theme];
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [rideStyle, setRideStyle] = useState('Touring');
+
+  const rideStyleOptions = ['Touring', 'City / Urban', 'Adventure / Off-road', 'Night Cruise', 'Sport', 'Cafe Racer'];
+
+  const submit = () => {
+    if (!name.trim() || !description.trim()) return;
+    onSubmit({ name: name.trim(), description: description.trim(), rideStyle });
+    setName('');
+    setDescription('');
+    setRideStyle('Touring');
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={styles.modalBackdrop}>
+        <Pressable style={styles.modalScrim} onPress={onClose} />
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={[styles.bottomSheet, { backgroundColor: t.surface, borderTopColor: t.primary }]}>
+            <View style={styles.rowBetween}>
+              <Text style={[styles.modalTitle, { color: t.text }]}>Create Squad</Text>
+              <TouchableOpacity onPress={onClose}>
+                <MaterialCommunityIcons name="close" size={24} color={t.muted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.formSection} showsVerticalScrollIndicator={false}>
+              <LabeledInput label="Squad Name" value={name} onChangeText={setName} theme={theme} placeholder="e.g. NCR Touring Pack" />
+
+              <View>
+                <Text style={[styles.inputLabel, { color: t.muted }]}>Description</Text>
+                <TextInput
+                  style={[styles.input, styles.inputMultiline, { backgroundColor: t.subtle, borderColor: t.border, color: t.text }]}
+                  multiline
+                  textAlignVertical="top"
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="What's your squad about?"
+                  placeholderTextColor={t.muted}
+                />
+              </View>
+
+              <View>
+                <Text style={[styles.inputLabel, { color: t.muted }]}>Ride Style</Text>
+                <View style={styles.wrapRow}>
+                  {rideStyleOptions.map((option) => {
+                    const isActive = rideStyle === option;
+                    return (
+                      <TouchableOpacity
+                        key={option}
+                        style={[
+                          styles.selectorChip,
+                          {
+                            borderColor: isActive ? t.primary : t.border,
+                            backgroundColor: isActive ? `${t.primary}22` : t.subtle
+                          }
+                        ]}
+                        onPress={() => setRideStyle(option)}
+                      >
+                        <Text style={[styles.selectorChipText, { color: isActive ? t.primary : t.muted }]}>{option}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+
+              <TouchableOpacity style={[styles.primaryButton, { backgroundColor: t.primary }]} onPress={submit}>
+                <MaterialCommunityIcons name="account-group" size={18} color="#fff" />
+                <Text style={styles.primaryButtonText}>Create Squad</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </Modal>
+  );
+};
+
+export const SquadDetailModal = ({
+  visible,
+  squad,
+  currentUser,
+  users,
+  onClose,
+  onJoinSquad,
+  onLeaveSquad,
+  onViewProfile,
+  theme
+}: {
+  visible: boolean;
+  squad: Squad | null;
+  currentUser: User;
+  users: User[];
+  onClose: () => void;
+  onJoinSquad: (squadId: string) => void;
+  onLeaveSquad: (squadId: string) => void;
+  onViewProfile: (userId: string) => void;
+  theme: Theme;
+}) => {
+  const t = TOKENS[theme];
+  if (!squad) return null;
+
+  const allUsers = [currentUser, ...users];
+  const isMember = squad.members.includes(currentUser.id);
+  const isOwner = squad.creatorId === currentUser.id;
+  const creator = allUsers.find((u) => u.id === squad.creatorId);
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}>
+        <View style={[styles.modalHeader, { borderBottomColor: t.border }]}>
+          <View style={styles.rowAligned}>
+            <TouchableOpacity onPress={onClose} style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}>
+              <MaterialCommunityIcons name="arrow-left" size={20} color={t.text} />
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: t.text }]}>Squad Details</Text>
+          </View>
+        </View>
+
+        <ScrollView contentContainerStyle={[styles.mainScroll, { paddingBottom: 40 }]}>
+          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
+            <View style={styles.squadCardHeader}>
+              <Image source={{ uri: squad.avatar || avatarFallback }} style={styles.squadAvatar} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.cardTitle, { color: t.text }]}>{squad.name}</Text>
+                <View style={[styles.rowAligned, { marginTop: 4 }]}>
+                  <View style={styles.rowAligned}>
+                    <MaterialCommunityIcons name="map-marker-outline" size={13} color={t.primary} />
+                    <Text style={[styles.metaText, { color: t.muted }]}>{squad.city}</Text>
+                  </View>
+                  <View style={[styles.pillTag, { borderColor: t.border, backgroundColor: t.subtle }]}>
+                    <Text style={[styles.pillTagText, { color: t.muted }]}>{squad.rideStyle}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            <Text style={[styles.bodyText, { color: t.text }]}>{squad.description}</Text>
+
+            <View style={styles.profileStatsRow}>
+              <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
+                <Text style={[styles.profileStatValue, { color: t.primary }]}>{squad.members.length}</Text>
+                <Text style={[styles.profileStatLabel, { color: t.muted }]}>Members</Text>
+              </View>
+              <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
+                <Text style={[styles.profileStatValue, { color: t.primary }]}>{creator?.name?.split(' ')[0] ?? '\u2014'}</Text>
+                <Text style={[styles.profileStatLabel, { color: t.muted }]}>Founded by</Text>
+              </View>
+            </View>
+
+            {!isMember ? (
+              <TouchableOpacity style={[styles.primaryButton, { backgroundColor: t.primary }]} onPress={() => onJoinSquad(squad.id)}>
+                <MaterialCommunityIcons name="plus" size={18} color="#fff" />
+                <Text style={styles.primaryButtonText}>Join Squad</Text>
+              </TouchableOpacity>
+            ) : isOwner ? (
+              <View style={[styles.statusStrip, { borderColor: `${t.primary}66`, backgroundColor: `${t.primary}15` }]}>
+                <MaterialCommunityIcons name="crown" size={16} color={t.primary} />
+                <Text style={[styles.statusStripText, { color: t.primary }]}>You own this squad</Text>
+              </View>
+            ) : (
+              <TouchableOpacity style={[styles.dangerButton, { borderColor: TOKENS[theme].red }]} onPress={() => onLeaveSquad(squad.id)}>
+                <MaterialCommunityIcons name="logout" size={18} color={TOKENS[theme].red} />
+                <Text style={[styles.dangerButtonText, { color: TOKENS[theme].red }]}>Leave Squad</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
+            <Text style={[styles.cardHeader, { color: t.muted }]}>MEMBERS ({squad.members.length})</Text>
+            {squad.members.map((memberId) => {
+              const member = allUsers.find((u) => u.id === memberId);
+              if (!member) return null;
+              return (
+                <TouchableOpacity
+                  key={memberId}
+                  style={[styles.friendRow, { borderColor: t.border }]}
+                  onPress={() => onViewProfile(memberId)}
+                >
+                  <View style={styles.rowAligned}>
+                    <Image source={{ uri: member.avatar || avatarFallback }} style={styles.avatarMedium} />
+                    <View>
+                      <View style={styles.rowAligned}>
+                        <Text style={[styles.boldText, { color: t.text }]}>{member.name}</Text>
+                        {memberId === squad.creatorId && (
+                          <MaterialCommunityIcons name="crown" size={13} color={t.primary} />
+                        )}
+                      </View>
+                      <Text style={[styles.metaText, { color: t.muted }]}>{member.garage?.[0] ?? 'Unknown machine'}</Text>
+                    </View>
+                  </View>
+                  <Badge color={memberId === squad.creatorId ? 'orange' : 'slate'} theme={theme}>
+                    {memberId === squad.creatorId ? 'Owner' : 'Member'}
+                  </Badge>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );

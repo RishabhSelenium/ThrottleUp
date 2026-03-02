@@ -8,9 +8,10 @@ import {
   MOCK_NEWS,
   MOCK_NOTIFICATIONS,
   MOCK_RIDES,
+  MOCK_SQUADS,
   MOCK_USERS
 } from '../constants';
-import { Conversation, HelpPost, NewsArticle, Notification, RidePost, User } from '../types';
+import { Conversation, HelpPost, NewsArticle, Notification, RidePost, Squad, User } from '../types';
 
 type FeedFilter = 'rides' | 'help';
 
@@ -73,6 +74,14 @@ type AppStateContextValue = {
   setActiveConversation: React.Dispatch<React.SetStateAction<Conversation | null>>;
   selectedUserId: string | null;
   setSelectedUserId: React.Dispatch<React.SetStateAction<string | null>>;
+  squads: Squad[];
+  setSquads: React.Dispatch<React.SetStateAction<Squad[]>>;
+  isCreateSquadModalOpen: boolean;
+  setIsCreateSquadModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  selectedSquadId: string | null;
+  setSelectedSquadId: React.Dispatch<React.SetStateAction<string | null>>;
+  squadSearchQuery: string;
+  setSquadSearchQuery: React.Dispatch<React.SetStateAction<string>>;
 };
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
@@ -110,6 +119,10 @@ export const AppStateProvider = ({ children }: { children: React.ReactNode }) =>
   const [selectedHelpPost, setSelectedHelpPost] = useState<HelpPost | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [squads, setSquads] = useState<Squad[]>(MOCK_SQUADS);
+  const [isCreateSquadModalOpen, setIsCreateSquadModalOpen] = useState(false);
+  const [selectedSquadId, setSelectedSquadId] = useState<string | null>(null);
+  const [squadSearchQuery, setSquadSearchQuery] = useState('');
 
   return (
     <AppStateContext.Provider
@@ -171,7 +184,15 @@ export const AppStateProvider = ({ children }: { children: React.ReactNode }) =>
         activeConversation,
         setActiveConversation,
         selectedUserId,
-        setSelectedUserId
+        setSelectedUserId,
+        squads,
+        setSquads,
+        isCreateSquadModalOpen,
+        setIsCreateSquadModalOpen,
+        selectedSquadId,
+        setSelectedSquadId,
+        squadSearchQuery,
+        setSquadSearchQuery
       }}
     >
       {children}

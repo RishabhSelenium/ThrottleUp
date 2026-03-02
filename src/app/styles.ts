@@ -113,6 +113,10 @@ export const styles = StyleSheet.create({
   listWrap: {
     gap: 12
   },
+  notificationListWrap: {
+    gap: 12,
+    padding: 14
+  },
   card: {
     borderWidth: 1,
     borderRadius: 20,
@@ -854,5 +858,77 @@ export const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 4,
     fontWeight: '900'
+  },
+  squadSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  squadSearchInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 14,
+    height: 44,
+    paddingHorizontal: 12,
+    fontSize: 13,
+    fontWeight: '600'
+  },
+  squadCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    gap: 10
+  },
+  squadCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12
+  },
+  squadAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 14
+  },
+  squadName: {
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  squadMemberAvatars: {
+    flexDirection: 'row',
+    marginLeft: 4
+  },
+  squadMemberAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    marginLeft: -8
+  },
+  squadActionButton: {
+    borderWidth: 1,
+    borderRadius: 12,
+    minHeight: 38,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6
+  },
+  squadActionButtonText: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase'
+  },
+  headerProfileButton: {
+    marginLeft: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    overflow: 'hidden'
+  },
+  headerProfileImage: {
+    width: '100%',
+    height: '100%'
   }
 });

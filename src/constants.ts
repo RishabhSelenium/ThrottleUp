@@ -1,4 +1,4 @@
-import { Conversation, HelpPost, NewsArticle, Notification, RidePost, User } from './types';
+import { Conversation, HelpPost, NewsArticle, Notification, RidePost, Squad, User } from './types';
 
 export const MOCK_CURRENT_USER: User = {
   id: 'me-123',
@@ -272,5 +272,52 @@ export const MOCK_NEWS: NewsArticle[] = [
     duplicateScore: 0.19,
     relevanceScore: 79,
     viralityScore: 67
+  }
+];
+
+export const MOCK_SQUADS: Squad[] = [
+  {
+    id: 'sq-1',
+    name: 'NCR Touring Pack',
+    description: 'Weekend touring squad covering Delhi-NCR and nearby highways. Regular rides to Rajasthan, Uttarakhand, and beyond.',
+    creatorId: 'me-123',
+    members: ['me-123', 'u1', 'u2'],
+    avatar: 'https://api.dicebear.com/7.x/identicon/png?seed=NCRTouring',
+    city: 'New Delhi',
+    rideStyle: 'Touring',
+    createdAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+  },
+  {
+    id: 'sq-2',
+    name: 'Delhi Street Riders',
+    description: 'City riders who love exploring hidden lanes, food spots, and heritage routes across Delhi.',
+    creatorId: 'u1',
+    members: ['u1', 'me-123', 'u3'],
+    avatar: 'https://api.dicebear.com/7.x/identicon/png?seed=DelhiStreet',
+    city: 'New Delhi',
+    rideStyle: 'City / Urban',
+    createdAt: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+  },
+  {
+    id: 'sq-3',
+    name: 'Himalayan Explorers Club',
+    description: 'ADV riders tackling mountain passes, off-road trails, and high-altitude camping. Ladakh dreams live here.',
+    creatorId: 'u2',
+    members: ['u2', 'u3'],
+    avatar: 'https://api.dicebear.com/7.x/identicon/png?seed=HimalayanExp',
+    city: 'Pan India',
+    rideStyle: 'Adventure / Off-road',
+    createdAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString()
+  },
+  {
+    id: 'sq-4',
+    name: 'Gurgaon Night Riders',
+    description: 'Late-night cruise squad. Quiet roads, good vibes, and chai stops at 2 AM.',
+    creatorId: 'u3',
+    members: ['u3'],
+    avatar: 'https://api.dicebear.com/7.x/identicon/png?seed=GurgaonNight',
+    city: 'Gurugram',
+    rideStyle: 'Night Cruise',
+    createdAt: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString()
   }
 ];

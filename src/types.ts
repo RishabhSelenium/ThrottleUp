@@ -117,3 +117,15 @@ export interface Conversation {
   unreadCount: number;
   messages: ChatMessage[];
 }
+
+export interface Squad {
+  id: string;
+  name: string;
+  description: string;
+  creatorId: string;
+  members: string[];
+  avatar: string;
+  city: string;
+  rideStyle: string;
+  createdAt: string;
+}

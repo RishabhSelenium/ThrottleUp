@@ -10,6 +10,7 @@ import * as Location from 'expo-location';
 import React, { useEffect, useMemo } from 'react';
 import {
   Alert,
+  Image,
   Linking,
   Platform,
   Pressable,
@@ -36,14 +37,16 @@ import {
   ChatRoomScreen,
   CreateHelpModal,
   CreateRideModal,
+  CreateSquadModal,
   EditProfileModal,
   HelpDetailScreen,
   LocationSettingsModal,
   NotificationsOverlay,
   RideDetailScreen,
+  SquadDetailModal,
   UserProfileModal
 } from './src/components/modals';
-import { ChatsTab, FeedTab, LoginScreen, MyRidesTab, NewsTab, ProfileTab, SplashScreen } from './src/screens/tabs';
+import { ChatsTab, FeedTab, LoginScreen, MyRidesTab, NewsTab, ProfileTab, SplashScreen, SquadTab } from './src/screens/tabs';
 import {
   MOCK_CONVERSATIONS,
   MOCK_CURRENT_USER,
@@ -51,9 +54,10 @@ import {
   MOCK_NEWS,
   MOCK_NOTIFICATIONS,
   MOCK_RIDES,
+  MOCK_SQUADS,
   MOCK_USERS
 } from './src/constants';
-import { ChatMessage, Conversation, HelpPost, HelpReply, NewsArticle, Notification, RidePost, RideVisibility, User } from './src/types';
+import { ChatMessage, Conversation, HelpPost, HelpReply, NewsArticle, Notification, RidePost, RideVisibility, Squad, User } from './src/types';
 import { signOutFirebase, subscribeToAuthState } from './src/firebase/auth';
 import { sendChatMessageToRealtime, subscribeChatMessages } from './src/firebase/chat';
 import { isFirebaseConfigured } from './src/firebase/client';
@@ -78,6 +82,7 @@ const STORAGE_KEYS = {
   helpPosts: 'ridesathi.helpPosts',
   conversations: 'ridesathi.conversations',
   news: 'ridesathi.news',
+  squads: 'ridesathi.squads',
   locationMode: 'ridesathi.locationMode'
 } as const;
 
@@ -214,7 +219,15 @@ const AppShell = () => {
     activeConversation,
     setActiveConversation,
     selectedUserId,
-    setSelectedUserId
+    setSelectedUserId,
+    squads,
+    setSquads,
+    isCreateSquadModalOpen,
+    setIsCreateSquadModalOpen,
+    selectedSquadId,
+    setSelectedSquadId,
+    squadSearchQuery,
+    setSquadSearchQuery
   } = useAppState();
 
   const t = TOKENS[theme];
@@ -226,7 +239,7 @@ const AppShell = () => {
 
     const hydrate = async () => {
       try {
-        const [savedTheme, savedUsers, savedNotifications, savedRides, savedHelpPosts, savedConversations, savedNews, savedLocationMode] =
+        const [savedTheme, savedUsers, savedNotifications, savedRides, savedHelpPosts, savedConversations, savedNews, savedSquads, savedLocationMode] =
           await Promise.all([
             AsyncStorage.getItem(STORAGE_KEYS.theme),
             AsyncStorage.getItem(STORAGE_KEYS.users),
@@ -235,6 +248,7 @@ const AppShell = () => {
             AsyncStorage.getItem(STORAGE_KEYS.helpPosts),
             AsyncStorage.getItem(STORAGE_KEYS.conversations),
             AsyncStorage.getItem(STORAGE_KEYS.news),
+            AsyncStorage.getItem(STORAGE_KEYS.squads),
             AsyncStorage.getItem(STORAGE_KEYS.locationMode)
           ]);
 
@@ -250,6 +264,7 @@ const AppShell = () => {
         setHelpPosts(safeParse<HelpPost[]>(savedHelpPosts, MOCK_HELP));
         setConversations(safeParse<Conversation[]>(savedConversations, MOCK_CONVERSATIONS));
         setNewsArticles(safeParse<NewsArticle[]>(savedNews, MOCK_NEWS));
+        setSquads(safeParse<Squad[]>(savedSquads, MOCK_SQUADS));
         setLocationMode(safeParse<LocationMode>(savedLocationMode, 'auto'));
 
         if (FIREBASE_ENABLED) {
@@ -367,6 +382,11 @@ const AppShell = () => {
 
   useEffect(() => {
     if (!hydrated) return;
+    saveToStorage(STORAGE_KEYS.squads, squads);
+  }, [hydrated, squads]);
+
+  useEffect(() => {
+    if (!hydrated) return;
     saveToStorage(STORAGE_KEYS.locationMode, locationMode);
   }, [hydrated, locationMode]);
 
@@ -387,6 +407,11 @@ const AppShell = () => {
     if (selectedUserId === currentUser.id) return currentUser;
     return users.find((user) => user.id === selectedUserId) ?? null;
   }, [selectedUserId, currentUser, users]);
+
+  const selectedSquad = useMemo(() => {
+    if (!selectedSquadId) return null;
+    return squads.find((s) => s.id === selectedSquadId) ?? null;
+  }, [squads, selectedSquadId]);
 
   const selectedFriendStatus: FriendStatus = useMemo(() => {
     if (!selectedUserProfile) return 'none';
@@ -415,11 +440,11 @@ const AppShell = () => {
         prev.map((conversation) =>
           conversation.id === conversationId
             ? {
-                ...conversation,
-                messages,
-                lastMessage: lastMessage.text,
-                timestamp: lastMessage.timestamp
-              }
+              ...conversation,
+              messages,
+              lastMessage: lastMessage.text,
+              timestamp: lastMessage.timestamp
+            }
             : conversation
         )
       );
@@ -427,11 +452,11 @@ const AppShell = () => {
       setActiveConversation((prev) =>
         prev && prev.id === conversationId
           ? {
-              ...prev,
-              messages,
-              lastMessage: lastMessage.text,
-              timestamp: lastMessage.timestamp
-            }
+            ...prev,
+            messages,
+            lastMessage: lastMessage.text,
+            timestamp: lastMessage.timestamp
+          }
           : prev
       );
     });
@@ -790,6 +815,46 @@ const AppShell = () => {
     setIsEditProfileOpen(false);
   };
 
+  const handleCreateSquad = (data: { name: string; description: string; rideStyle: string }) => {
+    const newSquad: Squad = {
+      id: `sq-${Date.now()}`,
+      name: data.name,
+      description: data.description,
+      creatorId: currentUser.id,
+      members: [currentUser.id],
+      avatar: `https://api.dicebear.com/7.x/identicon/png?seed=${encodeURIComponent(data.name)}`,
+      city: currentUser.city,
+      rideStyle: data.rideStyle,
+      createdAt: new Date().toISOString()
+    };
+    setSquads((prev) => [newSquad, ...prev]);
+    setIsCreateSquadModalOpen(false);
+  };
+
+  const handleJoinSquad = (squadId: string) => {
+    setSquads((prev) =>
+      prev.map((s) => {
+        if (s.id !== squadId) return s;
+        if (s.members.includes(currentUser.id)) return s;
+        return { ...s, members: [...s.members, currentUser.id] };
+      })
+    );
+  };
+
+  const handleLeaveSquad = (squadId: string) => {
+    setSquads((prev) =>
+      prev.map((s) => {
+        if (s.id !== squadId) return s;
+        if (s.creatorId === currentUser.id) return s;
+        return { ...s, members: s.members.filter((id) => id !== currentUser.id) };
+      })
+    );
+  };
+
+  const handleOpenSquadDetail = (squadId: string) => {
+    setSelectedSquadId(squadId);
+  };
+
   const handleResolveHelp = (id: string) => {
     setHelpPosts((prev) => {
       let updatedPost: HelpPost | null = null;
@@ -1064,7 +1129,7 @@ const AppShell = () => {
 
   if (!hydrated) {
     return (
-      <SafeAreaView style={[styles.fullScreen, { backgroundColor: TOKENS.dark.bg }]}> 
+      <SafeAreaView style={[styles.fullScreen, { backgroundColor: TOKENS.dark.bg }]}>
         <ExpoStatusBar style="light" translucent={false} backgroundColor={TOKENS.dark.bg} />
         <View style={styles.centered}>
           <MaterialCommunityIcons name="bike-fast" size={46} color={TOKENS.dark.primary} />
@@ -1076,10 +1141,10 @@ const AppShell = () => {
   }
 
   const renderMainScreen = (onLogoutAndNavigate: () => void) => (
-    <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}> 
+    <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}>
       <ExpoStatusBar style={theme === 'light' ? 'dark' : 'light'} translucent={false} backgroundColor={t.bg} />
-      <View style={[styles.container, { backgroundColor: t.bg, paddingTop: androidTopInset }]}> 
-        <View style={[styles.header, { borderBottomColor: t.border, backgroundColor: t.surface }]}> 
+      <View style={[styles.container, { backgroundColor: t.bg, paddingTop: androidTopInset }]}>
+        <View style={[styles.header, { borderBottomColor: t.border, backgroundColor: t.surface }]}>
           <View style={styles.headerTopRow}>
             <View style={styles.brandRow}>
               <View style={[styles.brandIconWrap, { backgroundColor: t.primary }]}>
@@ -1098,7 +1163,7 @@ const AppShell = () => {
                   color={notificationPermissionStatus === 'denied' ? t.muted : t.text}
                 />
                 {unreadCount > 0 && (
-                  <View style={[styles.badgeCounter, { backgroundColor: t.primary }]}> 
+                  <View style={[styles.badgeCounter, { backgroundColor: t.primary }]}>
                     <Text style={styles.badgeCounterText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
                   </View>
                 )}
@@ -1110,11 +1175,17 @@ const AppShell = () => {
                 <MaterialCommunityIcons name={locationMode === 'auto' ? 'crosshairs-gps' : 'map-marker-outline'} size={12} color={t.primary} />
                 <Text style={[styles.cityChipText, { color: t.muted }]}>{currentUser.city}</Text>
               </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setActiveTab('profile')}
+                style={[styles.headerProfileButton, { borderColor: activeTab === 'profile' ? t.primary : t.border }]}
+              >
+                <Image source={{ uri: currentUser.avatar || avatarFallback }} style={styles.headerProfileImage} />
+              </TouchableOpacity>
             </View>
           </View>
 
           {activeTab === 'feed' ? (
-            <View style={[styles.feedToggle, { backgroundColor: t.subtle }]}> 
+            <View style={[styles.feedToggle, { backgroundColor: t.subtle }]}>
               <Pressable
                 style={[styles.feedToggleButton, feedFilter === 'rides' && { backgroundColor: t.primary }]}
                 onPress={() => setFeedFilter('rides')}
@@ -1131,14 +1202,16 @@ const AppShell = () => {
               </Pressable>
             </View>
           ) : (
-            <Text style={[styles.sectionLabel, { color: t.text }]}> 
+            <Text style={[styles.sectionLabel, { color: t.text }]}>
               {activeTab === 'news'
                 ? 'BIKE NEWS'
                 : activeTab === 'my-rides'
                   ? 'MY RIDES'
                   : activeTab === 'chats'
                     ? 'MESSAGES'
-                    : 'MY PROFILE'}
+                    : activeTab === 'squad'
+                      ? 'SQUADS'
+                      : 'MY PROFILE'}
             </Text>
           )}
         </View>
@@ -1183,6 +1256,21 @@ const AppShell = () => {
               conversations={conversations}
               onOpenChatRoom={handleOpenChatRoom}
               onViewProfile={handleViewProfile}
+            />
+          )}
+
+          {activeTab === 'squad' && (
+            <SquadTab
+              theme={theme}
+              squads={squads}
+              currentUser={currentUser}
+              users={users}
+              searchQuery={squadSearchQuery}
+              onSearchChange={setSquadSearchQuery}
+              onCreateSquad={() => setIsCreateSquadModalOpen(true)}
+              onOpenSquadDetail={handleOpenSquadDetail}
+              onJoinSquad={handleJoinSquad}
+              onLeaveSquad={handleLeaveSquad}
             />
           )}
 
@@ -1233,7 +1321,7 @@ const AppShell = () => {
           </View>
         )}
 
-        <View style={[styles.tabBar, { borderTopColor: t.border, backgroundColor: t.surface }]}> 
+        <View style={[styles.tabBar, { borderTopColor: t.border, backgroundColor: t.surface }]}>
           <TabButton theme={theme} icon="compass-outline" label="Feed" active={activeTab === 'feed'} onPress={() => setActiveTab('feed')} />
           <TabButton theme={theme} icon="newspaper-variant-outline" label="News" active={activeTab === 'news'} onPress={() => setActiveTab('news')} />
           <TabButton
@@ -1244,7 +1332,7 @@ const AppShell = () => {
             onPress={() => setActiveTab('my-rides')}
           />
           <TabButton theme={theme} icon="message-outline" label="Chats" active={activeTab === 'chats'} onPress={() => setActiveTab('chats')} />
-          <TabButton theme={theme} icon="account-outline" label="Profile" active={activeTab === 'profile'} onPress={() => setActiveTab('profile')} />
+          <TabButton theme={theme} icon="account-group-outline" label="Squad" active={activeTab === 'squad'} onPress={() => setActiveTab('squad')} />
         </View>
       </View>
 
@@ -1339,6 +1427,25 @@ const AppShell = () => {
         onClose={() => setSelectedUserId(null)}
         onMessage={openOrCreateConversation}
         onAddFriend={handleSendFriendRequest}
+      />
+
+      <CreateSquadModal
+        visible={isCreateSquadModalOpen}
+        theme={theme}
+        onClose={() => setIsCreateSquadModalOpen(false)}
+        onSubmit={handleCreateSquad}
+      />
+
+      <SquadDetailModal
+        visible={Boolean(selectedSquad)}
+        squad={selectedSquad}
+        currentUser={currentUser}
+        users={users}
+        theme={theme}
+        onClose={() => setSelectedSquadId(null)}
+        onJoinSquad={handleJoinSquad}
+        onLeaveSquad={handleLeaveSquad}
+        onViewProfile={handleViewProfile}
       />
     </SafeAreaView>
   );

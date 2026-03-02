@@ -17,16 +17,16 @@ import {
 import { styles } from '../app/styles';
 import { TOKENS, Theme, avatarFallback, formatClock, formatRelative } from '../app/ui';
 import { Badge, RideCard } from '../components/common';
-import { Conversation, HelpPost, NewsArticle, RidePost, User } from '../types';
+import { Conversation, HelpPost, NewsArticle, RidePost, Squad, User } from '../types';
 
 export const SplashScreen = ({ theme }: { theme: Theme }) => {
   const t = TOKENS[theme];
 
   return (
-    <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}> 
+    <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}>
       <ExpoStatusBar style={theme === 'light' ? 'dark' : 'light'} translucent={false} backgroundColor={t.bg} />
       <View style={styles.centered}>
-        <View style={[styles.splashIcon, { backgroundColor: t.primary }]}> 
+        <View style={[styles.splashIcon, { backgroundColor: t.primary }]}>
           <MaterialCommunityIcons name="flash" size={56} color="#fff" />
         </View>
         <Text style={[styles.splashBrand, { color: t.text }]}>ThrottleUp</Text>
@@ -87,13 +87,13 @@ export const LoginScreen = ({
   };
 
   return (
-    <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}> 
+    <SafeAreaView style={[styles.fullScreen, { backgroundColor: t.bg }]}>
       <ExpoStatusBar style={theme === 'light' ? 'dark' : 'light'} translucent={false} backgroundColor={t.bg} />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.fullScreen}>
         <ScrollView contentContainerStyle={styles.loginScroll} keyboardShouldPersistTaps="always">
-          <View style={[styles.loginCard, { backgroundColor: t.surface, borderColor: t.border }]}> 
+          <View style={[styles.loginCard, { backgroundColor: t.surface, borderColor: t.border }]}>
             <View style={styles.loginTopRow}>
-              <View style={[styles.brandIconWrap, { backgroundColor: t.primary }]}> 
+              <View style={[styles.brandIconWrap, { backgroundColor: t.primary }]}>
                 <MaterialCommunityIcons name="flash" size={20} color="#fff" />
               </View>
               <View style={styles.themeToggleCompact}>
@@ -248,11 +248,11 @@ export const FeedTab = ({
           </Text>
 
           <View style={styles.rowBetween}>
-            <View style={[styles.statChip, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.statChip, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <MaterialCommunityIcons name="message-outline" size={14} color={t.muted} />
               <Text style={[styles.statText, { color: t.muted }]}>{post.replies.length} replies</Text>
             </View>
-            <View style={[styles.statChip, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.statChip, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <MaterialCommunityIcons name="arrow-up-bold" size={14} color={t.primary} />
               <Text style={[styles.statText, { color: t.text }]}>{post.upvotes}</Text>
             </View>
@@ -303,20 +303,20 @@ export const NewsTab = ({
 
           <View style={styles.wrapRow}>
             {item.tags.map((tag) => (
-              <View key={`${item.id}-${tag}`} style={[styles.newsTag, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+              <View key={`${item.id}-${tag}`} style={[styles.newsTag, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <Text style={[styles.newsTagText, { color: t.muted }]}>{tag}</Text>
               </View>
             ))}
           </View>
 
           <View style={styles.newsScoreRow}>
-            <View style={[styles.newsScoreChip, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.newsScoreChip, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <Text style={[styles.metaText, { color: t.muted }]}>Dup {(item.duplicateScore * 100).toFixed(0)}%</Text>
             </View>
-            <View style={[styles.newsScoreChip, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.newsScoreChip, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <Text style={[styles.metaText, { color: t.muted }]}>Rel {item.relevanceScore}</Text>
             </View>
-            <View style={[styles.newsScoreChip, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+            <View style={[styles.newsScoreChip, { borderColor: t.border, backgroundColor: t.subtle }]}>
               <Text style={[styles.metaText, { color: t.muted }]}>Vir {item.viralityScore}</Text>
             </View>
           </View>
@@ -443,7 +443,7 @@ export const ProfileTab = ({
 
   return (
     <View style={styles.listWrap}>
-      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
         <View style={styles.rowBetween}>
           <View style={styles.rowAligned}>
             <Image source={{ uri: currentUser.avatar || avatarFallback }} style={styles.avatarLarge} />
@@ -467,11 +467,11 @@ export const ProfileTab = ({
         </View>
 
         <View style={styles.profileStatsRow}>
-          <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+          <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
             <Text style={[styles.profileStatValue, { color: t.primary }]}>{currentUser.friends.length}</Text>
             <Text style={[styles.profileStatLabel, { color: t.muted }]}>Friends</Text>
           </View>
-          <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+          <View style={[styles.profileStatCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
             <Text style={[styles.profileStatValue, { color: t.primary }]}>{rides.filter((r) => r.creatorId === currentUser.id).length}</Text>
             <Text style={[styles.profileStatLabel, { color: t.muted }]}>Rides</Text>
           </View>
@@ -481,7 +481,7 @@ export const ProfileTab = ({
         <View style={styles.wrapRow}>
           {currentUser.garage.length > 0 ? (
             currentUser.garage.map((bike, idx) => (
-              <View key={`${bike}-${idx}`} style={[styles.pillTag, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+              <View key={`${bike}-${idx}`} style={[styles.pillTag, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <Text style={[styles.pillTagText, { color: t.text }]}>{bike}</Text>
               </View>
             ))
@@ -491,18 +491,18 @@ export const ProfileTab = ({
         </View>
 
         <View style={styles.gridTwo}>
-          <View style={[styles.infoTile, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+          <View style={[styles.infoTile, { borderColor: t.border, backgroundColor: t.subtle }]}>
             <Text style={[styles.inputLabel, { color: t.muted }]}>Riding Style</Text>
             <Text style={[styles.bodyText, { color: t.text }]}>{currentUser.style}</Text>
           </View>
-          <View style={[styles.infoTile, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+          <View style={[styles.infoTile, { borderColor: t.border, backgroundColor: t.subtle }]}>
             <Text style={[styles.inputLabel, { color: t.muted }]}>Typical Ride</Text>
             <Text style={[styles.bodyText, { color: t.text }]}>{currentUser.typicalRideTime}</Text>
           </View>
         </View>
       </View>
 
-      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
         <Text style={[styles.cardHeader, { color: t.muted }]}>MY RIDING SQUAD</Text>
         {currentUser.friends.length === 0 ? (
           <Text style={[styles.bodyText, { color: t.muted }]}>No riders in your squad yet.</Text>
@@ -544,9 +544,9 @@ export const ProfileTab = ({
         )}
       </View>
 
-      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}> 
+      <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
         <Text style={[styles.cardHeader, { color: t.muted }]}>PREFERENCES</Text>
-        <View style={[styles.preferenceRow, { borderColor: t.border, backgroundColor: t.subtle }]}> 
+        <View style={[styles.preferenceRow, { borderColor: t.border, backgroundColor: t.subtle }]}>
           <View style={styles.rowAligned}>
             <MaterialCommunityIcons name={theme === 'light' ? 'weather-sunny' : 'weather-night'} size={20} color={t.primary} />
             <View>
@@ -571,6 +571,189 @@ export const ProfileTab = ({
         <MaterialCommunityIcons name="logout" size={18} color={TOKENS[theme].red} />
         <Text style={[styles.dangerButtonText, { color: TOKENS[theme].red }]}>Sign Out</Text>
       </TouchableOpacity>
+    </View>
+  );
+};
+
+export const SquadTab = ({
+  theme,
+  squads,
+  currentUser,
+  users,
+  searchQuery,
+  onSearchChange,
+  onCreateSquad,
+  onOpenSquadDetail,
+  onJoinSquad,
+  onLeaveSquad
+}: {
+  theme: Theme;
+  squads: Squad[];
+  currentUser: User;
+  users: User[];
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  onCreateSquad: () => void;
+  onOpenSquadDetail: (squadId: string) => void;
+  onJoinSquad: (squadId: string) => void;
+  onLeaveSquad: (squadId: string) => void;
+}) => {
+  const t = TOKENS[theme];
+
+  const filteredSquads = squads.filter((s) =>
+    s.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const mySquads = filteredSquads.filter((s) => s.members.includes(currentUser.id));
+  const discoverSquads = filteredSquads.filter((s) => !s.members.includes(currentUser.id));
+
+  const renderMemberAvatars = (memberIds: string[], maxShow = 4) => {
+    const allUsers = [currentUser, ...users];
+    const shown = memberIds.slice(0, maxShow);
+    const extra = memberIds.length - maxShow;
+
+    return (
+      <View style={styles.squadMemberAvatars}>
+        {shown.map((id, idx) => {
+          const u = allUsers.find((user) => user.id === id);
+          return (
+            <Image
+              key={id}
+              source={{ uri: u?.avatar || avatarFallback }}
+              style={[
+                styles.squadMemberAvatar,
+                { borderColor: t.card, marginLeft: idx === 0 ? 0 : -8 }
+              ]}
+            />
+          );
+        })}
+        {extra > 0 && (
+          <View
+            style={[
+              styles.squadMemberAvatar,
+              {
+                borderColor: t.card,
+                backgroundColor: t.subtle,
+                alignItems: 'center',
+                justifyContent: 'center'
+              }
+            ]}
+          >
+            <Text style={{ fontSize: 10, fontWeight: '800', color: t.muted }}>+{extra}</Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderSquadCard = (squad: Squad, isMember: boolean) => (
+    <TouchableOpacity
+      key={squad.id}
+      style={[styles.squadCard, { backgroundColor: t.card, borderColor: t.border }]}
+      onPress={() => onOpenSquadDetail(squad.id)}
+    >
+      <View style={styles.squadCardHeader}>
+        <Image source={{ uri: squad.avatar || avatarFallback }} style={styles.squadAvatar} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.squadName, { color: t.text }]}>{squad.name}</Text>
+          <View style={[styles.rowAligned, { marginTop: 2 }]}>
+            <View style={styles.rowAligned}>
+              <MaterialCommunityIcons name="account-group" size={13} color={t.muted} />
+              <Text style={[styles.metaText, { color: t.muted }]}>{squad.members.length}</Text>
+            </View>
+            <View style={styles.rowAligned}>
+              <MaterialCommunityIcons name="map-marker-outline" size={13} color={t.primary} />
+              <Text style={[styles.metaText, { color: t.muted }]}>{squad.city}</Text>
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <Text style={[styles.bodyText, { color: t.muted }]} numberOfLines={2}>
+        {squad.description}
+      </Text>
+
+      <View style={styles.rowBetween}>
+        <View style={styles.rowAligned}>
+          {renderMemberAvatars(squad.members)}
+          <View style={[styles.pillTag, { borderColor: t.border, backgroundColor: t.subtle }]}>
+            <Text style={[styles.pillTagText, { color: t.muted }]}>{squad.rideStyle}</Text>
+          </View>
+        </View>
+        {isMember ? (
+          squad.creatorId === currentUser.id ? (
+            <View style={[styles.squadActionButton, { borderColor: t.primary, backgroundColor: `${t.primary}15` }]}>
+              <MaterialCommunityIcons name="crown" size={14} color={t.primary} />
+              <Text style={[styles.squadActionButtonText, { color: t.primary }]}>Owner</Text>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={[styles.squadActionButton, { borderColor: t.border, backgroundColor: t.subtle }]}
+              onPress={(e) => { e.stopPropagation?.(); onLeaveSquad(squad.id); }}
+            >
+              <MaterialCommunityIcons name="logout" size={14} color={t.red} />
+              <Text style={[styles.squadActionButtonText, { color: t.red }]}>Leave</Text>
+            </TouchableOpacity>
+          )
+        ) : (
+          <TouchableOpacity
+            style={[styles.squadActionButton, { borderColor: t.primary, backgroundColor: t.primary }]}
+            onPress={(e) => { e.stopPropagation?.(); onJoinSquad(squad.id); }}
+          >
+            <MaterialCommunityIcons name="plus" size={14} color="#fff" />
+            <Text style={[styles.squadActionButtonText, { color: '#fff' }]}>Join</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.listWrap}>
+      <View style={styles.squadSearchRow}>
+        <View style={{ flex: 1 }}>
+          <TextInput
+            style={[styles.squadSearchInput, { backgroundColor: t.subtle, borderColor: t.border, color: t.text }]}
+            placeholder="Search squads..."
+            placeholderTextColor={t.muted}
+            value={searchQuery}
+            onChangeText={onSearchChange}
+          />
+        </View>
+        <TouchableOpacity
+          style={[styles.squadActionButton, { borderColor: t.primary, backgroundColor: t.primary, minHeight: 44 }]}
+          onPress={onCreateSquad}
+        >
+          <MaterialCommunityIcons name="plus" size={16} color="#fff" />
+          <Text style={[styles.squadActionButtonText, { color: '#fff' }]}>Create</Text>
+        </TouchableOpacity>
+      </View>
+
+      {mySquads.length > 0 && (
+        <>
+          <Text style={[styles.cardHeader, { color: t.muted, marginTop: 6 }]}>MY SQUADS</Text>
+          {mySquads.map((squad) => renderSquadCard(squad, true))}
+        </>
+      )}
+
+      {discoverSquads.length > 0 && (
+        <>
+          <Text style={[styles.cardHeader, { color: t.muted, marginTop: 6 }]}>DISCOVER SQUADS</Text>
+          {discoverSquads.map((squad) => renderSquadCard(squad, false))}
+        </>
+      )}
+
+      {filteredSquads.length === 0 && (
+        <View style={styles.emptyWrap}>
+          <MaterialCommunityIcons name="account-group-outline" size={48} color={t.muted} />
+          <Text style={[styles.emptyTitle, { color: t.text }]}>
+            {searchQuery ? 'No squads found.' : 'No squads yet.'}
+          </Text>
+          <Text style={[styles.emptySubtitle, { color: t.muted }]}>
+            {searchQuery ? 'Try a different search term.' : 'Create your own riding squad!'}
+          </Text>
+        </View>
+      )}
     </View>
   );
 };
