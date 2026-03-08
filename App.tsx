@@ -4528,10 +4528,13 @@ const AppShell = () => {
             <ChatsTab
               theme={theme}
               conversations={visibleConversations}
+              squads={squads}
+              currentUser={currentUser}
               syncError={syncState.chat.error}
               isSyncing={syncState.chat.isSyncing}
               onRetrySync={handleRetryChatSync}
               onOpenChatRoom={handleOpenChatRoom}
+              onOpenSquadChat={(squad) => handleOpenSquadChat(squad.id)}
               onViewProfile={handleViewProfile}
             />
           )}

@@ -14,7 +14,8 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
+  Pressable
 } from 'react-native';
 
 import { styles } from '../app/styles';
@@ -700,24 +701,50 @@ export const MyRidesTab = ({
 export const ChatsTab = ({
   theme,
   conversations,
+  squads,
+  currentUser,
   syncError,
   isSyncing,
   onRetrySync,
   onOpenChatRoom,
+  onOpenSquadChat,
   onViewProfile
 }: {
   theme: Theme;
   conversations: Conversation[];
+  squads: Squad[];
+  currentUser: User;
   syncError: string | null;
   isSyncing: boolean;
   onRetrySync: () => void;
   onOpenChatRoom: (conversation: Conversation) => void;
+  onOpenSquadChat: (squad: Squad) => void;
   onViewProfile: (userId: string) => void;
 }) => {
   const t = TOKENS[theme];
+  const [chatTabFilter, setChatTabFilter] = useState<'primary' | 'squads'>('primary');
+
+  const mySquads = useMemo(() => squads.filter((sq) => sq.members.includes(currentUser.id)), [squads, currentUser.id]);
 
   return (
     <View style={styles.listWrap}>
+      <View style={[styles.feedToggle, { backgroundColor: t.subtle, marginHorizontal: 16, marginTop: 16 }]}>
+        <Pressable
+          style={[styles.feedToggleButton, chatTabFilter === 'primary' && { backgroundColor: t.primary }]}
+          onPress={() => setChatTabFilter('primary')}
+        >
+          <MaterialCommunityIcons name="message-outline" size={14} color={chatTabFilter === 'primary' ? '#fff' : t.muted} />
+          <Text style={[styles.feedToggleText, { color: chatTabFilter === 'primary' ? '#fff' : t.muted }]}>Primary</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.feedToggleButton, chatTabFilter === 'squads' && { backgroundColor: t.primary }]}
+          onPress={() => setChatTabFilter('squads')}
+        >
+          <MaterialCommunityIcons name="account-group-outline" size={14} color={chatTabFilter === 'squads' ? '#fff' : t.muted} />
+          <Text style={[styles.feedToggleText, { color: chatTabFilter === 'squads' ? '#fff' : t.muted }]}>Squads</Text>
+        </Pressable>
+      </View>
+
       {syncError ? (
         <SyncErrorBanner
           theme={theme}
@@ -728,38 +755,70 @@ export const ChatsTab = ({
         />
       ) : null}
 
-      {conversations.length === 0 ? (
-        <View style={styles.emptyWrap}>
-          <MaterialCommunityIcons name="message-outline" size={48} color={t.muted} />
-          <Text style={[styles.emptyTitle, { color: t.text }]}>No chats yet.</Text>
-          <Text style={[styles.emptySubtitle, { color: t.muted }]}>Connect with riders to start messaging.</Text>
-        </View>
-      ) : (
-        conversations.map((chat) => (
-          <TouchableOpacity
-            key={chat.id}
-            style={[styles.chatRow, { backgroundColor: t.card, borderColor: t.border }]}
-            onPress={() => onOpenChatRoom(chat)}
-          >
-            <TouchableOpacity onPress={() => onViewProfile(chat.participantId)}>
-              <View>
-                <Image source={{ uri: chat.participantAvatar || avatarFallback }} style={styles.avatarMedium} />
-                {chat.unreadCount > 0 && <View style={[styles.unreadDot, { backgroundColor: t.primary }]} />}
+      {chatTabFilter === 'primary' ? (
+        conversations.length === 0 ? (
+          <View style={styles.emptyWrap}>
+            <MaterialCommunityIcons name="message-outline" size={48} color={t.muted} />
+            <Text style={[styles.emptyTitle, { color: t.text }]}>No chats yet.</Text>
+            <Text style={[styles.emptySubtitle, { color: t.muted }]}>Connect with riders to start messaging.</Text>
+          </View>
+        ) : (
+          conversations.map((chat) => (
+            <TouchableOpacity
+              key={chat.id}
+              style={[styles.chatRow, { backgroundColor: t.card, borderColor: t.border }]}
+              onPress={() => onOpenChatRoom(chat)}
+            >
+              <TouchableOpacity onPress={() => onViewProfile(chat.participantId)}>
+                <View>
+                  <Image source={{ uri: chat.participantAvatar || avatarFallback }} style={styles.avatarMedium} />
+                  {chat.unreadCount > 0 && <View style={[styles.unreadDot, { backgroundColor: t.primary }]} />}
+                </View>
+              </TouchableOpacity>
+              <View style={styles.chatInfo}>
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.boldText, { color: t.text }]} numberOfLines={1}>
+                    {chat.participantName}
+                  </Text>
+                  <Text style={[styles.metaText, { color: t.muted }]}>{chat.timestamp}</Text>
+                </View>
+                <Text style={[styles.chatPreview, { color: chat.unreadCount > 0 ? t.text : t.muted }]} numberOfLines={1}>
+                  {chat.lastMessage}
+                </Text>
               </View>
             </TouchableOpacity>
-            <View style={styles.chatInfo}>
-              <View style={styles.rowBetween}>
-                <Text style={[styles.boldText, { color: t.text }]} numberOfLines={1}>
-                  {chat.participantName}
-                </Text>
-                <Text style={[styles.metaText, { color: t.muted }]}>{chat.timestamp}</Text>
+          ))
+        )
+      ) : (
+        mySquads.length === 0 ? (
+          <View style={styles.emptyWrap}>
+            <MaterialCommunityIcons name="account-group-outline" size={48} color={t.muted} />
+            <Text style={[styles.emptyTitle, { color: t.text }]}>No squads joined.</Text>
+            <Text style={[styles.emptySubtitle, { color: t.muted }]}>Join a squad to participate in group chats.</Text>
+          </View>
+        ) : (
+          mySquads.map((squad) => (
+            <TouchableOpacity
+              key={squad.id}
+              style={[styles.chatRow, { backgroundColor: t.card, borderColor: t.border }]}
+              onPress={() => onOpenSquadChat(squad)}
+            >
+              <View>
+                <Image source={{ uri: squad.avatar || avatarFallback }} style={styles.avatarMedium} />
               </View>
-              <Text style={[styles.chatPreview, { color: chat.unreadCount > 0 ? t.text : t.muted }]} numberOfLines={1}>
-                {chat.lastMessage}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        ))
+              <View style={styles.chatInfo}>
+                <View style={styles.rowBetween}>
+                  <Text style={[styles.boldText, { color: t.text }]} numberOfLines={1}>
+                    {squad.name}
+                  </Text>
+                </View>
+                <Text style={[styles.chatPreview, { color: t.muted }]} numberOfLines={1}>
+                  {squad.members.length} member{squad.members.length === 1 ? '' : 's'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))
+        )
       )}
     </View>
   );
