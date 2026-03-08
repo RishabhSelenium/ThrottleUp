@@ -3342,6 +3342,56 @@ const AppShell = () => {
     });
   };
 
+  const handleLeaveRide = (rideId: string) => {
+    let rideJoinStateToSync: { rideId: string; currentParticipants: string[]; requests: string[] } | null = null;
+    let didLeaveRide = false;
+    let leftRideTitle = '';
+    setRides((prev) => {
+      const next = prev.map((ride) => {
+        if (ride.id !== rideId) return ride;
+        if (ride.creatorId === currentUser.id) return ride;
+        if (!ride.currentParticipants.includes(currentUser.id)) return ride;
+
+        const paymentStatusByUserId = ride.paymentStatusByUserId ? { ...ride.paymentStatusByUserId } : undefined;
+        if (paymentStatusByUserId) {
+          delete paymentStatusByUserId[currentUser.id];
+        }
+
+        const updatedRide: RidePost = {
+          ...ride,
+          currentParticipants: ride.currentParticipants.filter((id) => id !== currentUser.id),
+          requests: ride.requests.filter((id) => id !== currentUser.id),
+          paymentStatusByUserId: paymentStatusByUserId && Object.keys(paymentStatusByUserId).length > 0 ? paymentStatusByUserId : undefined
+        };
+        rideJoinStateToSync = {
+          rideId: updatedRide.id,
+          currentParticipants: updatedRide.currentParticipants,
+          requests: updatedRide.requests
+        };
+        didLeaveRide = true;
+        leftRideTitle = updatedRide.title;
+        return updatedRide;
+      });
+
+      if (rideJoinStateToSync && FIREBASE_ENABLED) {
+        const rideToSync = rideJoinStateToSync;
+        runRideMutationSync(() =>
+          updateRideJoinStateInFirestore(rideToSync.rideId, {
+            currentParticipants: rideToSync.currentParticipants,
+            requests: rideToSync.requests
+          })
+        );
+      }
+
+      return next;
+    });
+
+    if (didLeaveRide) {
+      pushSystemNotification(`You left "${leftRideTitle}".`);
+      setIsNotificationsOpen(true);
+    }
+  };
+
   const handleOpenRideDetail = (ride: RidePost) => {
     if (blockedUserIds.has(ride.creatorId)) {
       pushSystemNotification('This ride is from a blocked rider.');
@@ -4661,6 +4711,7 @@ const AppShell = () => {
         onUpdateRide={handleUpdateRide}
         onEditRide={handleOpenRideEditor}
         onCancelRide={handleCancelRide}
+        onLeaveRide={handleLeaveRide}
         onReportRide={handleReportRide}
         rideTrackingSession={effectiveRideTrackingSession}
         isLiveTrackingSyncing={syncState.rideTracking.isSyncing}

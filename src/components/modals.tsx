@@ -523,9 +523,34 @@ type RideCostOption = 'Paid' | 'Split' | 'Free';
 type InviteAudience = 'groups' | 'riders';
 type RideInclusion = 'Dinner' | 'Drinks' | 'Breakfast' | 'Lunch';
 type RideStep = 1 | 2 | 3 | 4 | 5;
-type LocationPickerContext = 'primaryDestination' | 'rideStarts' | 'rideEnds';
+type StopPickerContext = `stop:${number}`;
+type InsertStopPickerContext = `insertStop:${number}`;
+type LocationPickerContext = 'primaryDestination' | 'rideStarts' | 'rideEnds' | StopPickerContext | InsertStopPickerContext;
 type TimePickerField = 'assembly' | 'flagOff';
 type DatePickerField = 'startDate' | 'returnDate';
+
+const isStopPickerContext = (context: LocationPickerContext): context is StopPickerContext | InsertStopPickerContext =>
+  context.startsWith('stop:') || context.startsWith('insertStop:');
+
+const getStopIndexFromContext = (context: LocationPickerContext): number | null => {
+  if (!isStopPickerContext(context)) return null;
+  const parsed = Number(context.startsWith('stop:') ? context.slice(5) : context.slice(11));
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const normalizeRouteStopLabels = (points: MapPoint[]): MapPoint[] => {
+  let stopOrdinal = 0;
+  return points.map((point) => {
+    stopOrdinal += 1;
+    const trimmedLabel = point.label?.trim() ?? '';
+    const hasCustomLabel = trimmedLabel.length > 0 && !/^stop\s+\d+$/i.test(trimmedLabel);
+
+    return {
+      ...point,
+      label: hasCustomLabel ? trimmedLabel : `Stop ${stopOrdinal}`
+    };
+  });
+};
 
 const TRENDING_DESTINATIONS_FALLBACK = [
   'United Coffee House Rewind',
@@ -1378,6 +1403,7 @@ export const CreateRideModal = ({
   const [hasRiderLimit, setHasRiderLimit] = useState(false);
   const [maxParticipants, setMaxParticipants] = useState('5');
   const [routePoints, setRoutePoints] = useState<MapPoint[]>([]);
+  const [destinationIndex, setDestinationIndex] = useState(0);
   const [draftRoutePoints, setDraftRoutePoints] = useState<MapPoint[]>([]);
   const [destinationQuery, setDestinationQuery] = useState('');
   const [savedDestinations, setSavedDestinations] = useState<string[]>([]);
@@ -1494,6 +1520,7 @@ export const CreateRideModal = ({
     setIsRidePointPickerOpen(false);
     setDraftRidePoint(null);
     setRoutePoints([]);
+    setDestinationIndex(0);
     setDraftRoutePoints([]);
     setIsStopPickerOpen(false);
     setRouteEstimate(null);
@@ -1557,6 +1584,7 @@ export const CreateRideModal = ({
     setHasRiderLimit(initialRide.maxParticipants < 20);
     setMaxParticipants(String(initialRide.maxParticipants > 0 ? initialRide.maxParticipants : 5));
     setRoutePoints(normalizedStopPoints);
+    setDestinationIndex(normalizedStopPoints.length);
     setDraftRoutePoints([]);
     setDestinationQuery('');
     setGoogleDestinationSuggestions([]);
@@ -1867,12 +1895,20 @@ export const CreateRideModal = ({
   const getLocationValueByContext = (context: LocationPickerContext): string => {
     if (context === 'rideStarts') return rideStartsAt;
     if (context === 'rideEnds') return rideEndsAt;
+    const stopIndex = getStopIndexFromContext(context);
+    if (stopIndex !== null) {
+      return routePoints[stopIndex]?.label?.trim() ?? '';
+    }
     return primaryDestination;
   };
 
   const getPointByContext = (context: LocationPickerContext): MapPoint | null => {
     if (context === 'rideStarts') return rideStartPoint;
     if (context === 'rideEnds') return rideEndPoint;
+    const stopIndex = getStopIndexFromContext(context);
+    if (stopIndex !== null) {
+      return routePoints[stopIndex] ?? null;
+    }
     return null;
   };
 
@@ -1919,6 +1955,36 @@ export const CreateRideModal = ({
       return;
     }
 
+    const stopIndex = getStopIndexFromContext(context);
+    if (stopIndex !== null) {
+      if (!resolvedPoint) return;
+
+      const isInsert = context.startsWith('insertStop:');
+      if (isInsert) {
+        setDestinationIndex((prev) => prev + 1);
+      }
+
+      setRoutePoints((prev) => {
+        const nextPoint: MapPoint = {
+          ...resolvedPoint,
+          label: normalized
+        };
+        const nextStops = [...prev];
+        if (isInsert) {
+          nextStops.splice(stopIndex, 0, nextPoint);
+        } else if (stopIndex >= 0 && stopIndex < nextStops.length) {
+          nextStops[stopIndex] = nextPoint;
+        } else {
+          nextStops.push(nextPoint);
+        }
+        return normalizeRouteStopLabels(nextStops);
+      });
+      setDestinationQuery(normalized);
+      saveDestination(normalized);
+      setIsDestinationPickerOpen(false);
+      return;
+    }
+
     if (context === 'rideStarts') {
       setRideStartsAt(normalized);
       setRideStartPoint(resolvedPoint ? { ...resolvedPoint, label: 'Ride starts' } : null);
@@ -1932,14 +1998,30 @@ export const CreateRideModal = ({
     setIsDestinationPickerOpen(false);
   };
 
-  const handleApplyLocationSelection = (value: string, context: LocationPickerContext) => {
+  const handleApplyLocationSelection = async (value: string, context: LocationPickerContext) => {
+    const stopIndex = getStopIndexFromContext(context);
+    if (stopIndex !== null) {
+      const normalized = value.trim();
+      if (!normalized) return;
+      const parsedCoordinatePoint = parseCoordinateLabelPoint(normalized);
+      const resolvedPoint = parsedCoordinatePoint ?? (await fetchGoogleFindPlacePoint(normalized, GOOGLE_PLACES_KEY));
+      if (!resolvedPoint) {
+        Alert.alert('Select a valid stop', 'Choose a suggested location or enter coordinates like 28.6139, 77.2090.');
+        return;
+      }
+      applyLocationByContext(normalized, context, resolvedPoint);
+      return;
+    }
+
     applyLocationByContext(value, context, null);
   };
 
   const handleApplyGoogleSuggestion = async (suggestion: GooglePlaceSuggestion, context: LocationPickerContext) => {
     const point = await fetchGooglePlacePoint(suggestion.placeId);
     const resolvedLabel = point?.label?.trim() || suggestion.description;
-    applyLocationByContext(resolvedLabel, context, point);
+    const fallbackPoint =
+      point ?? (isStopPickerContext(context) ? await fetchGoogleFindPlacePoint(resolvedLabel, GOOGLE_PLACES_KEY) : null);
+    applyLocationByContext(resolvedLabel, context, fallbackPoint);
   };
 
   const openRidePointPicker = (context: 'rideStarts' | 'rideEnds') => {
@@ -1989,11 +2071,11 @@ export const CreateRideModal = ({
   };
 
   const addLocationFromQuery = () => {
-    handleApplyLocationSelection(destinationQuery, locationPickerContext);
+    void handleApplyLocationSelection(destinationQuery, locationPickerContext);
   };
 
   const openMapPickerFromDestination = () => {
-    if (locationPickerContext === 'primaryDestination') return;
+    if (locationPickerContext !== 'rideStarts' && locationPickerContext !== 'rideEnds') return;
     setIsDestinationPickerOpen(false);
     openRidePointPicker(locationPickerContext);
   };
@@ -2095,15 +2177,18 @@ export const CreateRideModal = ({
       ? 'Select Assembly Time'
       : 'Select Flag Off Time';
 
+  const activeStopIndex = getStopIndexFromContext(locationPickerContext);
   const destinationPlaceholder =
     locationPickerContext === 'primaryDestination'
       ? 'Primary Destination'
       : locationPickerContext === 'rideStarts'
         ? 'Ride starts'
-        : 'Ride ends';
+        : locationPickerContext === 'rideEnds'
+          ? 'Ride ends'
+          : `Stop ${activeStopIndex !== null ? activeStopIndex + 1 : ''}`.trim();
   const destinationQueryValue = destinationQuery.trim();
   const shouldSearchGoogleSuggestions = destinationQueryValue.length >= PLACE_AUTOCOMPLETE_MIN_QUERY_LENGTH;
-  const showMapPickerAction = locationPickerContext !== 'primaryDestination';
+  const showMapPickerAction = locationPickerContext === 'rideStarts' || locationPickerContext === 'rideEnds';
 
   const buildRoutePointSnapshotKey = (points: MapPoint[]): string =>
     points
@@ -2287,6 +2372,25 @@ export const CreateRideModal = ({
     setIsStopPickerOpen(false);
   };
 
+  const handleAddOutboundStop = () => {
+    openDestinationPicker(`insertStop:${destinationIndex}`);
+  };
+
+  const handleAddReturnStop = () => {
+    openDestinationPicker(`stop:${routePoints.length}`);
+  };
+
+  const handleEditRouteStop = (index: number) => {
+    openDestinationPicker(`stop:${index}`);
+  };
+
+  const handleRemoveRouteStop = (index: number) => {
+    setRoutePoints((prev) => normalizeRouteStopLabels(prev.filter((_item, itemIndex) => itemIndex !== index)));
+    if (index < destinationIndex) {
+      setDestinationIndex((prev) => prev - 1);
+    }
+  };
+
   const toggleInclusion = (option: RideInclusion) => {
     setInclusions((prev) => {
       if (prev.includes(option)) {
@@ -2452,34 +2556,183 @@ export const CreateRideModal = ({
                   </View>
                 )}
 
-                <View style={createRideWizardStyles.fieldBlock}>
-                  <TouchableOpacity
-                    style={[createRideWizardStyles.filledInput, createRideWizardStyles.locationPickerInput, { backgroundColor: t.surface, borderColor: t.border }]}
-                    onPress={() => openDestinationPicker('rideStarts')}
-                  >
-                    <Text style={[createRideWizardStyles.locationPickerInputText, { color: rideStartsAt ? t.text : `${t.muted}99` }]}>
-                      {rideStartsAt || 'Ride starts*'}
-                    </Text>
-                    <MaterialCommunityIcons name="map-marker-outline" size={18} color={t.muted} />
-                  </TouchableOpacity>
+                <View style={[createRideWizardStyles.timelineWrap]}>
+                  {/* Start Point */}
+                  <View style={createRideWizardStyles.timelineRow}>
+                    <View style={createRideWizardStyles.timelineLeftCol}>
+                      <View style={[createRideWizardStyles.timelineNode, { borderColor: t.text }]} />
+                      <View style={[createRideWizardStyles.timelineLine, { backgroundColor: t.border }]} />
+                    </View>
+                    <View style={createRideWizardStyles.timelineContent}>
+                      <TouchableOpacity
+                        style={[createRideWizardStyles.filledInput, createRideWizardStyles.locationPickerInput, { backgroundColor: t.surface, borderColor: t.border }]}
+                        onPress={() => openDestinationPicker('rideStarts')}
+                      >
+                        <Text style={[createRideWizardStyles.locationPickerInputText, { color: rideStartsAt ? t.text : `${t.muted}99` }]}>
+                          {rideStartsAt || 'Ride starts*'}
+                        </Text>
+                        <MaterialCommunityIcons name="map-marker-outline" size={18} color={t.muted} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
 
-                  <TextInput
-                    style={[createRideWizardStyles.filledInput, { backgroundColor: t.surface, borderColor: t.border, color: t.text }]}
-                    value={ridingTo}
-                    onChangeText={setRidingTo}
-                    placeholder="Riding to*"
-                    placeholderTextColor={`${t.muted}99`}
-                  />
+                  {/* Intermediate Route Points (Outbound) */}
+                  {routePoints.slice(0, destinationIndex).map((point, i) => (
+                    <View key={`${point.lat}-${point.lng}-out-${i}`} style={createRideWizardStyles.timelineRow}>
+                      <View style={createRideWizardStyles.timelineLeftCol}>
+                        <View style={[createRideWizardStyles.timelineNode, { borderColor: accent }]}>
+                          <Text style={[createRideWizardStyles.timelineNodeText, { color: accent }]}>
+                            {String.fromCharCode(65 + i)}
+                          </Text>
+                        </View>
+                        <View style={[createRideWizardStyles.timelineLine, { backgroundColor: t.border }]} />
+                      </View>
+                      <View style={createRideWizardStyles.timelineContent}>
+                        <View style={createRideWizardStyles.stopInputRow}>
+                          <TouchableOpacity
+                            style={[
+                              createRideWizardStyles.filledInput,
+                              createRideWizardStyles.locationPickerInput,
+                              createRideWizardStyles.stopInputField,
+                              { backgroundColor: t.surface, borderColor: t.border }
+                            ]}
+                            onPress={() => handleEditRouteStop(i)}
+                          >
+                            <Text style={[createRideWizardStyles.locationPickerInputText, { color: point.label?.trim() ? t.text : `${t.muted}99` }]}>
+                              {point.label?.trim() || `Stop ${i + 1}`}
+                            </Text>
+                            <MaterialCommunityIcons name="map-marker-path" size={18} color={t.muted} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}
+                            onPress={() => handleRemoveRouteStop(i)}
+                          >
+                            <MaterialCommunityIcons name="close" size={16} color={TOKENS[theme].red} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
 
-                  <TouchableOpacity
-                    style={[createRideWizardStyles.filledInput, createRideWizardStyles.locationPickerInput, { backgroundColor: t.surface, borderColor: t.border }]}
-                    onPress={() => openDestinationPicker('rideEnds')}
-                  >
-                    <Text style={[createRideWizardStyles.locationPickerInputText, { color: rideEndsAt ? t.text : `${t.muted}99` }]}>
-                      {rideEndsAt || 'Ride ends*'}
-                    </Text>
-                    <MaterialCommunityIcons name="map-marker-outline" size={18} color={t.muted} />
-                  </TouchableOpacity>
+                  {/* Add Outbound Stop Button */}
+                  {routePoints.length < 5 && (
+                    <View style={createRideWizardStyles.timelineRow}>
+                      <View style={createRideWizardStyles.timelineLeftCol}>
+                        <View style={[createRideWizardStyles.timelineNode, { borderColor: t.muted, borderStyle: 'dashed' }]}>
+                          <MaterialCommunityIcons name="plus" size={14} color={t.muted} />
+                        </View>
+                        <View style={[createRideWizardStyles.timelineLine, { backgroundColor: t.border }]} />
+                      </View>
+                      <View style={createRideWizardStyles.timelineContent}>
+                        <TouchableOpacity
+                          style={createRideWizardStyles.addStopButtonTimeline}
+                          onPress={handleAddOutboundStop}
+                        >
+                          <Text style={[createRideWizardStyles.addStopButtonTextTimeline, { color: t.muted }]}>Add stop</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Riding To (Primary Destination) */}
+                  <View style={createRideWizardStyles.timelineRow}>
+                    <View style={createRideWizardStyles.timelineLeftCol}>
+                      <View style={[createRideWizardStyles.timelineNode, { borderColor: accent }]}>
+                        <Text style={[createRideWizardStyles.timelineNodeText, { color: accent }]}>
+                          {String.fromCharCode(65 + destinationIndex)}
+                        </Text>
+                      </View>
+                      <View style={[createRideWizardStyles.timelineLine, { backgroundColor: t.border }]} />
+                    </View>
+                    <View style={createRideWizardStyles.timelineContent}>
+                      <TextInput
+                        style={[createRideWizardStyles.filledInput, { backgroundColor: t.surface, borderColor: t.border, color: t.text }]}
+                        value={ridingTo}
+                        onChangeText={setRidingTo}
+                        placeholder="Riding to*"
+                        placeholderTextColor={`${t.muted}99`}
+                      />
+                    </View>
+                  </View>
+
+                  {/* Intermediate Route Points (Return) */}
+                  {routePoints.slice(destinationIndex).map((point, index) => {
+                    const absIndex = destinationIndex + index;
+                    return (
+                      <View key={`${point.lat}-${point.lng}-ret-${absIndex}`} style={createRideWizardStyles.timelineRow}>
+                        <View style={createRideWizardStyles.timelineLeftCol}>
+                          <View style={[createRideWizardStyles.timelineNode, { borderColor: accent }]}>
+                            <Text style={[createRideWizardStyles.timelineNodeText, { color: accent }]}>
+                              {String.fromCharCode(65 + absIndex + 1)}
+                            </Text>
+                          </View>
+                          <View style={[createRideWizardStyles.timelineLine, { backgroundColor: t.border }]} />
+                        </View>
+                        <View style={createRideWizardStyles.timelineContent}>
+                          <View style={createRideWizardStyles.stopInputRow}>
+                            <TouchableOpacity
+                              style={[
+                                createRideWizardStyles.filledInput,
+                                createRideWizardStyles.locationPickerInput,
+                                createRideWizardStyles.stopInputField,
+                                { backgroundColor: t.surface, borderColor: t.border }
+                              ]}
+                              onPress={() => handleEditRouteStop(absIndex)}
+                            >
+                              <Text style={[createRideWizardStyles.locationPickerInputText, { color: point.label?.trim() ? t.text : `${t.muted}99` }]}>
+                                {point.label?.trim() || `Stop ${absIndex + 1}`}
+                              </Text>
+                              <MaterialCommunityIcons name="map-marker-path" size={18} color={t.muted} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}
+                              onPress={() => handleRemoveRouteStop(absIndex)}
+                            >
+                              <MaterialCommunityIcons name="close" size={16} color={TOKENS[theme].red} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      </View>
+                    );
+                  })}
+
+                  {/* Add Return Stop Button */}
+                  {routePoints.length < 5 && (
+                    <View style={createRideWizardStyles.timelineRow}>
+                      <View style={createRideWizardStyles.timelineLeftCol}>
+                        <View style={[createRideWizardStyles.timelineNode, { borderColor: t.muted, borderStyle: 'dashed' }]}>
+                          <MaterialCommunityIcons name="plus" size={14} color={t.muted} />
+                        </View>
+                        <View style={[createRideWizardStyles.timelineLine, { backgroundColor: t.border }]} />
+                      </View>
+                      <View style={createRideWizardStyles.timelineContent}>
+                        <TouchableOpacity
+                          style={createRideWizardStyles.addStopButtonTimeline}
+                          onPress={handleAddReturnStop}
+                        >
+                          <Text style={[createRideWizardStyles.addStopButtonTextTimeline, { color: t.muted }]}>Add stop</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {/* End Point */}
+                  <View style={createRideWizardStyles.timelineRow}>
+                    <View style={createRideWizardStyles.timelineLeftCol}>
+                      <View style={[createRideWizardStyles.timelineNode, { borderColor: t.text }]} />
+                    </View>
+                    <View style={createRideWizardStyles.timelineContent}>
+                      <TouchableOpacity
+                        style={[createRideWizardStyles.filledInput, createRideWizardStyles.locationPickerInput, { backgroundColor: t.surface, borderColor: t.border }]}
+                        onPress={() => openDestinationPicker('rideEnds')}
+                      >
+                        <Text style={[createRideWizardStyles.locationPickerInputText, { color: rideEndsAt ? t.text : `${t.muted}99` }]}>
+                          {rideEndsAt || 'Ride ends*'}
+                        </Text>
+                        <MaterialCommunityIcons name="map-marker-outline" size={18} color={t.muted} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
                 </View>
 
                 <TouchableOpacity
@@ -3230,7 +3483,9 @@ export const CreateRideModal = ({
                     <TouchableOpacity
                       key={`saved-${item}`}
                       style={[createRideWizardStyles.destinationListRow, { borderBottomColor: t.border }]}
-                      onPress={() => handleApplyLocationSelection(item, locationPickerContext)}
+                      onPress={() => {
+                        void handleApplyLocationSelection(item, locationPickerContext);
+                      }}
                     >
                       <View style={styles.rowAligned}>
                         <MaterialCommunityIcons name="bookmark-outline" size={20} color={accent} />
@@ -3250,7 +3505,9 @@ export const CreateRideModal = ({
                   <TouchableOpacity
                     key={`suggestion-${item}`}
                     style={[createRideWizardStyles.destinationListRow, { borderBottomColor: t.border }]}
-                    onPress={() => handleApplyLocationSelection(item, locationPickerContext)}
+                    onPress={() => {
+                      void handleApplyLocationSelection(item, locationPickerContext);
+                    }}
                   >
                     <View style={styles.rowAligned}>
                       <MaterialCommunityIcons name="map-marker-radius-outline" size={20} color={t.muted} />
@@ -3261,7 +3518,9 @@ export const CreateRideModal = ({
 
               <TouchableOpacity
                 style={[createRideWizardStyles.destinationListRow, { borderBottomColor: t.border, opacity: normalizedCurrentCity ? 1 : 0.5 }]}
-                onPress={() => handleApplyLocationSelection(normalizedCurrentCity, locationPickerContext)}
+                onPress={() => {
+                  void handleApplyLocationSelection(normalizedCurrentCity, locationPickerContext);
+                }}
                 disabled={!normalizedCurrentCity}
               >
                 <View style={styles.rowAligned}>
@@ -3347,6 +3606,53 @@ export const CreateRideModal = ({
 };
 
 const createRideWizardStyles = StyleSheet.create({
+  timelineWrap: {
+    marginTop: 10,
+    marginBottom: 4
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    minHeight: 56
+  },
+  timelineLeftCol: {
+    width: 32,
+    alignItems: 'center',
+    marginRight: 10
+  },
+  timelineNode: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    marginTop: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff'
+  },
+  timelineNodeText: {
+    fontSize: 10,
+    fontWeight: '800'
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    marginTop: 4,
+    marginBottom: -14
+  },
+  timelineContent: {
+    flex: 1,
+    paddingBottom: 12
+  },
+  addStopButtonTimeline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    gap: 8
+  },
+  addStopButtonTextTimeline: {
+    fontSize: 13,
+    fontWeight: '700'
+  },
   sectionDivider: {
     borderBottomWidth: 1,
     marginVertical: 4
@@ -3533,6 +3839,32 @@ const createRideWizardStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10
+  },
+  stopInputsWrap: {
+    gap: 8
+  },
+  stopInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  stopInputField: {
+    flex: 1
+  },
+  addStopButton: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8
+  },
+  addStopButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3
   },
   locationPickerInputText: {
     flex: 1,
@@ -4431,6 +4763,7 @@ export const RideDetailScreen = ({
   onUpdateRide,
   onEditRide,
   onCancelRide,
+  onLeaveRide,
   onReportRide,
   rideTrackingSession,
   isLiveTrackingSyncing = false,
@@ -4460,6 +4793,7 @@ export const RideDetailScreen = ({
   onUpdateRide: (rideId: string, updates: Partial<RidePost>) => void;
   onEditRide?: (rideId: string) => void;
   onCancelRide: (rideId: string) => void;
+  onLeaveRide: (rideId: string) => void;
   onReportRide?: (rideId: string) => void;
   rideTrackingSession?: RideTrackingSession | null;
   isLiveTrackingSyncing?: boolean;
@@ -5282,10 +5616,18 @@ export const RideDetailScreen = ({
               <Text style={[styles.dangerButtonText, { color: TOKENS[theme].red }]}>Cancel Ride</Text>
             </TouchableOpacity>
           ) : isJoined ? (
-            <View style={[styles.statusStrip, { borderColor: TOKENS[theme].green, backgroundColor: `${TOKENS[theme].green}22` }]}>
-              <MaterialCommunityIcons name="account-check-outline" size={18} color={TOKENS[theme].green} />
-              <Text style={[styles.statusStripText, { color: TOKENS[theme].green }]}>You are joined</Text>
-            </View>
+            <TouchableOpacity
+              style={[styles.dangerButton, { borderColor: TOKENS[theme].red }]}
+              onPress={() =>
+                Alert.alert('Leave ride?', 'You can join again later if seats are available.', [
+                  { text: 'Stay', style: 'cancel' },
+                  { text: 'Leave Ride', style: 'destructive', onPress: () => onLeaveRide(ride.id) }
+                ])
+              }
+            >
+              <MaterialCommunityIcons name="account-arrow-right-outline" size={18} color={TOKENS[theme].red} />
+              <Text style={[styles.dangerButtonText, { color: TOKENS[theme].red }]}>Leave Ride</Text>
+            </TouchableOpacity>
           ) : isCreatorBlocked ? (
             <View style={[styles.statusStrip, { borderColor: TOKENS[theme].red, backgroundColor: `${TOKENS[theme].red}1f` }]}>
               <MaterialCommunityIcons name="account-cancel-outline" size={18} color={TOKENS[theme].red} />
