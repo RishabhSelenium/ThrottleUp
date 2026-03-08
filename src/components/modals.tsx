@@ -2564,12 +2564,13 @@ export const CreateRideModal = ({
                       <View style={[createRideWizardStyles.timelineLine, { backgroundColor: t.border }]} />
                     </View>
                     <View style={createRideWizardStyles.timelineContent}>
+                      <Text style={[createRideWizardStyles.fieldLabel, { color: t.text, marginBottom: 6 }]}>Ride starts</Text>
                       <TouchableOpacity
                         style={[createRideWizardStyles.filledInput, createRideWizardStyles.locationPickerInput, { backgroundColor: t.surface, borderColor: t.border }]}
                         onPress={() => openDestinationPicker('rideStarts')}
                       >
                         <Text style={[createRideWizardStyles.locationPickerInputText, { color: rideStartsAt ? t.text : `${t.muted}99` }]}>
-                          {rideStartsAt || 'Ride starts*'}
+                          {rideStartsAt || 'Search location'}
                         </Text>
                         <MaterialCommunityIcons name="map-marker-outline" size={18} color={t.muted} />
                       </TouchableOpacity>
@@ -2645,11 +2646,12 @@ export const CreateRideModal = ({
                       <View style={[createRideWizardStyles.timelineLine, { backgroundColor: t.border }]} />
                     </View>
                     <View style={createRideWizardStyles.timelineContent}>
+                      <Text style={[createRideWizardStyles.fieldLabel, { color: t.text, marginBottom: 6 }]}>Riding to</Text>
                       <TextInput
                         style={[createRideWizardStyles.filledInput, { backgroundColor: t.surface, borderColor: t.border, color: t.text }]}
                         value={ridingTo}
                         onChangeText={setRidingTo}
-                        placeholder="Riding to*"
+                        placeholder="Search location"
                         placeholderTextColor={`${t.muted}99`}
                       />
                     </View>
@@ -2722,12 +2724,13 @@ export const CreateRideModal = ({
                       <View style={[createRideWizardStyles.timelineNode, { borderColor: t.text }]} />
                     </View>
                     <View style={createRideWizardStyles.timelineContent}>
+                      <Text style={[createRideWizardStyles.fieldLabel, { color: t.text, marginBottom: 6 }]}>Ride ends</Text>
                       <TouchableOpacity
                         style={[createRideWizardStyles.filledInput, createRideWizardStyles.locationPickerInput, { backgroundColor: t.surface, borderColor: t.border }]}
                         onPress={() => openDestinationPicker('rideEnds')}
                       >
                         <Text style={[createRideWizardStyles.locationPickerInputText, { color: rideEndsAt ? t.text : `${t.muted}99` }]}>
-                          {rideEndsAt || 'Ride ends*'}
+                          {rideEndsAt || 'Search location'}
                         </Text>
                         <MaterialCommunityIcons name="map-marker-outline" size={18} color={t.muted} />
                       </TouchableOpacity>
