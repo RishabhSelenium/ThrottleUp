@@ -1,0 +1,14 @@
+{
+  "name": "ridesathi-r2-signer",
+  "private": true,
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.877.0",
+    "@aws-sdk/s3-request-presigner": "^3.877.0",
+    "express": "^5.1.0"
+  }
+}

@@ -36,7 +36,8 @@ import {
   formatDay,
   formatInrAmount,
   formatRideDistance,
-  formatRideEta
+  formatRideEta,
+  getRideLifecycleStatus
 } from '../app/ui';
 import { buildRideJoinAndroidIntentUrl, buildRideJoinDeepLink, PLAY_STORE_URL } from '../app/deep-links';
 import { Badge, LabeledInput, SelectorRow } from './common';
@@ -4911,6 +4912,8 @@ export const RideDetailScreen = ({
   const hasRouteStats =
     typeof ride.routeEtaMinutes === 'number' || typeof ride.routeDistanceKm === 'number' || typeof ride.tollEstimateInr === 'number';
   const rideDateLabel = buildRideDateSummary(ride);
+  const rideLifecycle = getRideLifecycleStatus(ride);
+  const isRideClosed = rideLifecycle.joinClosed;
   const paymentParticipantIds = Array.from(new Set(ride.currentParticipants.filter((participantId) => participantId !== ride.creatorId)));
   const hasPaidCost = ride.costType === 'Paid' || ride.costType === 'Split';
   const splitPerRiderAmount =
@@ -5072,9 +5075,19 @@ export const RideDetailScreen = ({
         <ScrollView contentContainerStyle={styles.listWrap}>
           <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
             <View style={styles.rowBetween}>
-              <Badge color="orange" theme={theme}>
-                {ride.type}
-              </Badge>
+              <View style={styles.rowAligned}>
+                {isRideClosed && (
+                  <>
+                    <Badge color="red" theme={theme}>
+                      Closed
+                    </Badge>
+                    <View style={{ width: 6 }} />
+                  </>
+                )}
+                <Badge color="orange" theme={theme}>
+                  {ride.type}
+                </Badge>
+              </View>
               <Text style={[styles.metaText, { color: t.muted }]}>{rideDateLabel}</Text>
             </View>
 
@@ -5572,7 +5585,7 @@ export const RideDetailScreen = ({
             </View>
           </View>
 
-          {isCreator && requestEntries.length > 0 && (
+          {isCreator && requestEntries.length > 0 && !isRideClosed && (
             <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
               <Text style={[styles.cardHeader, { color: t.primary }]}>JOIN REQUESTS ({requestEntries.length})</Text>
               {requestEntries.map((entry) => (
@@ -5600,6 +5613,16 @@ export const RideDetailScreen = ({
                   </View>
                 </View>
               ))}
+            </View>
+          )}
+
+          {isCreator && requestEntries.length > 0 && isRideClosed && (
+            <View style={[styles.card, { backgroundColor: t.card, borderColor: t.border }]}>
+              <Text style={[styles.cardHeader, { color: TOKENS[theme].red }]}>JOIN REQUESTS ({requestEntries.length})</Text>
+              <View style={[styles.statusStrip, { borderColor: `${TOKENS[theme].red}55`, backgroundColor: `${TOKENS[theme].red}14` }]}>
+                <MaterialCommunityIcons name="clock-alert-outline" size={18} color={TOKENS[theme].red} />
+                <Text style={[styles.statusStripText, { color: TOKENS[theme].red }]}>Ride closed. New join approvals are disabled.</Text>
+              </View>
             </View>
           )}
         </ScrollView>
@@ -5635,6 +5658,11 @@ export const RideDetailScreen = ({
             <View style={[styles.statusStrip, { borderColor: TOKENS[theme].red, backgroundColor: `${TOKENS[theme].red}1f` }]}>
               <MaterialCommunityIcons name="account-cancel-outline" size={18} color={TOKENS[theme].red} />
               <Text style={[styles.statusStripText, { color: TOKENS[theme].red }]}>Creator blocked</Text>
+            </View>
+          ) : isRideClosed ? (
+            <View style={[styles.statusStrip, { borderColor: TOKENS[theme].red, backgroundColor: `${TOKENS[theme].red}14` }]}>
+              <MaterialCommunityIcons name="clock-alert-outline" size={18} color={TOKENS[theme].red} />
+              <Text style={[styles.statusStripText, { color: TOKENS[theme].red }]}>Ride closed</Text>
             </View>
           ) : isPending ? (
             <View style={[styles.statusStrip, { borderColor: t.border, backgroundColor: t.subtle }]}>

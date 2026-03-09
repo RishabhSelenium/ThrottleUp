@@ -25,11 +25,13 @@ import {
   RidePaymentStatus,
   RidePost,
   RideVisibility,
+  SignedImageAsset,
   Squad,
   SquadJoinPermission,
   User
 } from '../types';
 import { getFirebaseServices } from './client';
+import { refreshSignedImageAsset } from './storage';
 
 const USERS_COLLECTION = 'users';
 const RIDES_COLLECTION = 'rides';
@@ -60,6 +62,26 @@ const asStringMap = (value: unknown): Record<string, string> | undefined => {
   const entries = Object.entries(value as Record<string, unknown>)
     .map(([key, item]) => [key.trim(), typeof item === 'string' ? item.trim() : ''] as const)
     .filter(([key, item]) => key.length > 0 && item.length > 0);
+
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(entries);
+};
+const asSignedImageAsset = (value: unknown): SignedImageAsset | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const objectKey = typeof raw.objectKey === 'string' ? raw.objectKey.trim() : '';
+  const signedUrl = typeof raw.signedUrl === 'string' ? raw.signedUrl.trim() : '';
+  const expiresAt = typeof raw.expiresAt === 'string' ? raw.expiresAt.trim() : '';
+
+  if (!objectKey || !signedUrl || !expiresAt) return undefined;
+  return { objectKey, signedUrl, expiresAt };
+};
+const asSignedImageAssetMap = (value: unknown): Record<string, SignedImageAsset> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    .map(([key, item]) => [key.trim(), asSignedImageAsset(item)] as const)
+    .filter((entry): entry is readonly [string, SignedImageAsset] => entry[0].length > 0 && entry[1] !== undefined);
 
   if (entries.length === 0) return undefined;
   return Object.fromEntries(entries);
@@ -174,6 +196,12 @@ const normalizeUser = (id: string, raw: DocumentData): User => {
   const normalizedSosContacts = normalizeSosContacts(raw.sosContacts);
   const legacySosNumber = typeof raw.sosNumber === 'string' ? raw.sosNumber.trim() : '';
   const primarySosNumber = normalizedSosContacts[0] ?? legacySosNumber;
+  const avatarAsset = asSignedImageAsset(raw.avatarAsset);
+  const bikePhotoAssetsByName = asSignedImageAssetMap(raw.bikePhotoAssetsByName);
+  const bikePhotosByName =
+    bikePhotoAssetsByName
+      ? Object.fromEntries(Object.entries(bikePhotoAssetsByName).map(([bikeName, asset]) => [bikeName, asset.signedUrl]))
+      : asStringMap(raw.bikePhotosByName);
 
   return {
     id,
@@ -186,7 +214,7 @@ const normalizeUser = (id: string, raw: DocumentData): User => {
     experience: (asString(raw.experience, 'Beginner') as User['experience']) ?? 'Beginner',
     distance: asString(raw.distance),
     isPro: asBoolean(raw.isPro, false),
-    avatar: asString(raw.avatar),
+    avatar: avatarAsset?.signedUrl ?? asString(raw.avatar),
     verified: asBoolean(raw.verified, false),
     typicalRideTime: asString(raw.typicalRideTime),
     friends: asStringArray(raw.friends),
@@ -203,7 +231,9 @@ const normalizeUser = (id: string, raw: DocumentData): User => {
     dob: typeof raw.dob === 'string' ? raw.dob : undefined,
     bloodGroup: typeof raw.bloodGroup === 'string' ? raw.bloodGroup : undefined,
     profileComplete: typeof raw.profileComplete === 'boolean' ? raw.profileComplete : undefined,
-    bikePhotosByName: asStringMap(raw.bikePhotosByName),
+    avatarAsset,
+    bikePhotosByName,
+    bikePhotoAssetsByName,
     expoPushTokens: Array.from(
       new Set(
         asStringArray(raw.expoPushTokens).filter((token) => /^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/.test(token))
@@ -303,6 +333,7 @@ const normalizeSquad = (id: string, raw: DocumentData): Squad => {
   const adminIds = Array.from(new Set(asStringArray(raw.adminIds))).filter((memberId) =>
     memberId !== asString(raw.creatorId) && members.includes(memberId)
   );
+  const avatarAsset = asSignedImageAsset(raw.avatarAsset);
 
   return {
     id,
@@ -311,7 +342,8 @@ const normalizeSquad = (id: string, raw: DocumentData): Squad => {
     creatorId: asString(raw.creatorId),
     members,
     adminIds,
-    avatar: asString(raw.avatar),
+    avatar: avatarAsset?.signedUrl ?? asString(raw.avatar),
+    avatarAsset,
     city: asString(raw.city),
     rideStyles: normalizeSquadRideStyles(raw),
     joinPermission: normalizeSquadJoinPermission(raw.joinPermission),
@@ -320,12 +352,81 @@ const normalizeSquad = (id: string, raw: DocumentData): Squad => {
   };
 };
 
+const EXPIRY_REFRESH_BUFFER_MS = 60 * 1000;
+
+const shouldRefreshSignedImageAsset = (asset: SignedImageAsset | undefined): asset is SignedImageAsset => {
+  if (!asset) return false;
+  const expiresAt = Date.parse(asset.expiresAt);
+  if (!Number.isFinite(expiresAt)) return true;
+  return expiresAt <= Date.now() + EXPIRY_REFRESH_BUFFER_MS;
+};
+
+const refreshUserImageAssetsIfNeeded = async (user: User): Promise<User> => {
+  let nextUser = user;
+  let changed = false;
+
+  if (shouldRefreshSignedImageAsset(user.avatarAsset)) {
+    const avatarAsset = await refreshSignedImageAsset(user.avatarAsset.objectKey);
+    nextUser = {
+      ...nextUser,
+      avatar: avatarAsset.signedUrl,
+      avatarAsset
+    };
+    changed = true;
+  }
+
+  if (user.bikePhotoAssetsByName) {
+    const refreshedEntries = await Promise.all(
+      Object.entries(user.bikePhotoAssetsByName).map(async ([bikeName, asset]) => {
+        if (!shouldRefreshSignedImageAsset(asset)) {
+          return [bikeName, asset] as const;
+        }
+
+        const refreshedAsset = await refreshSignedImageAsset(asset.objectKey);
+        changed = true;
+        return [bikeName, refreshedAsset] as const;
+      })
+    );
+
+    const bikePhotoAssetsByName = Object.fromEntries(refreshedEntries);
+    nextUser = {
+      ...nextUser,
+      bikePhotoAssetsByName,
+      bikePhotosByName: Object.fromEntries(
+        Object.entries(bikePhotoAssetsByName).map(([bikeName, asset]) => [bikeName, asset.signedUrl])
+      )
+    };
+  }
+
+  if (changed) {
+    await upsertUserInFirestore(nextUser);
+  }
+
+  return nextUser;
+};
+
+const refreshSquadImageAssetsIfNeeded = async (squad: Squad): Promise<Squad> => {
+  if (!shouldRefreshSignedImageAsset(squad.avatarAsset)) {
+    return squad;
+  }
+
+  const avatarAsset = await refreshSignedImageAsset(squad.avatarAsset.objectKey);
+  const nextSquad: Squad = {
+    ...squad,
+    avatar: avatarAsset.signedUrl,
+    avatarAsset
+  };
+  await upsertSquadInFirestore(nextSquad);
+  return nextSquad;
+};
+
 export const fetchUsersFromFirestore = async (): Promise<User[]> => {
   const services = getFirebaseServices();
   if (!services) return [];
 
   const snapshot = await getDocs(collection(services.firestore, USERS_COLLECTION));
-  return snapshot.docs.map((item) => normalizeUser(item.id, item.data()));
+  const users = snapshot.docs.map((item) => normalizeUser(item.id, item.data()));
+  return Promise.all(users.map(refreshUserImageAssetsIfNeeded));
 };
 
 export const fetchUserByIdFromFirestore = async (userId: string): Promise<User | null> => {
@@ -334,7 +435,7 @@ export const fetchUserByIdFromFirestore = async (userId: string): Promise<User |
 
   const snapshot = await getDoc(doc(services.firestore, USERS_COLLECTION, userId));
   if (!snapshot.exists()) return null;
-  return normalizeUser(snapshot.id, snapshot.data());
+  return refreshUserImageAssetsIfNeeded(normalizeUser(snapshot.id, snapshot.data()));
 };
 
 export const fetchRidesFromFirestore = async (): Promise<RidePost[]> => {
@@ -454,10 +555,12 @@ export const fetchSquadsFromFirestore = async (): Promise<Squad[]> => {
   const squadsRef = collection(services.firestore, SQUADS_COLLECTION);
   try {
     const snapshot = await getDocs(query(squadsRef, orderBy('createdAt', 'desc')));
-    return snapshot.docs.map((item) => normalizeSquad(item.id, item.data()));
+    const squads = snapshot.docs.map((item) => normalizeSquad(item.id, item.data()));
+    return Promise.all(squads.map(refreshSquadImageAssetsIfNeeded));
   } catch {
     const snapshot = await getDocs(squadsRef);
-    return snapshot.docs.map((item) => normalizeSquad(item.id, item.data()));
+    const squads = snapshot.docs.map((item) => normalizeSquad(item.id, item.data()));
+    return Promise.all(squads.map(refreshSquadImageAssetsIfNeeded));
   }
 };
 

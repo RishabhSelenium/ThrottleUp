@@ -2,7 +2,16 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React from 'react';
 import { Image, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-import { colorForBadge, formatInrAmount, formatRideDistance, formatRideEta, TOKENS, Theme, avatarFallback } from '../app/ui';
+import {
+  colorForBadge,
+  formatInrAmount,
+  formatRideDistance,
+  formatRideEta,
+  getRideLifecycleStatus,
+  TOKENS,
+  Theme,
+  avatarFallback
+} from '../app/ui';
 import { styles } from '../app/styles';
 import { RidePost } from '../types';
 
@@ -45,7 +54,9 @@ export const RideCard = ({
   const isCreator = ride.creatorId === currentUserId;
   const isJoined = ride.currentParticipants.includes(currentUserId);
   const requiresJoinApproval = ride.joinPermission !== 'anyone';
-  const joinModeLabel = requiresJoinApproval ? 'Request approval' : 'Open join';
+  const rideLifecycle = getRideLifecycleStatus(ride);
+  const isRideClosed = rideLifecycle.joinClosed;
+  const joinModeLabel = isRideClosed ? 'Closed' : requiresJoinApproval ? 'Request approval' : 'Open join';
   const hasRouteStats =
     typeof ride.routeEtaMinutes === 'number' || typeof ride.routeDistanceKm === 'number' || typeof ride.tollEstimateInr === 'number';
   const paymentSummary = getRidePaymentSummary(ride);
@@ -78,6 +89,14 @@ export const RideCard = ({
             <>
               <Badge color="green" theme={theme}>
                 Joined
+              </Badge>
+              <View style={{ width: 6 }} />
+            </>
+          )}
+          {isRideClosed && (
+            <>
+              <Badge color="red" theme={theme}>
+                Closed
               </Badge>
               <View style={{ width: 6 }} />
             </>
@@ -143,7 +162,15 @@ export const RideCard = ({
   );
 };
 
-export const Badge = ({ children, color = 'orange', theme }: { children: React.ReactNode; color?: 'orange' | 'blue' | 'green' | 'slate'; theme: Theme }) => {
+export const Badge = ({
+  children,
+  color = 'orange',
+  theme
+}: {
+  children: React.ReactNode;
+  color?: 'orange' | 'blue' | 'green' | 'red' | 'slate';
+  theme: Theme;
+}) => {
   const c = colorForBadge(color, theme);
 
   return (

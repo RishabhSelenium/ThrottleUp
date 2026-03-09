@@ -6,6 +6,8 @@ Firebase backend configuration lives here.
 - `firebase/firestore.rules`
 - `firebase/database.rules.json`
 - `firebase/storage.rules`
+- `cloudflare/`
+- `r2-signer/`
 - `cloudflare/` (R2 uploads + push fanout worker)
 
 ## Deploy rules

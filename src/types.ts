@@ -9,6 +9,12 @@ export type RideJoinPermission = 'anyone' | 'request_to_join';
 export type SquadJoinPermission = 'anyone' | 'request_to_join';
 export type SquadRole = 'owner' | 'admin' | 'member';
 
+export interface SignedImageAsset {
+  objectKey: string;
+  signedUrl: string;
+  expiresAt: string;
+}
+
 export interface RidePaymentStatus {
   userId: string;
   amount: number;
@@ -47,7 +53,9 @@ export interface User {
   dob?: string;
   bloodGroup?: string;
   profileComplete?: boolean;
+  avatarAsset?: SignedImageAsset;
   bikePhotosByName?: Record<string, string>;
+  bikePhotoAssetsByName?: Record<string, SignedImageAsset>;
   expoPushTokens?: string[];
 }
 
@@ -215,6 +223,7 @@ export interface Squad {
   members: string[];
   adminIds: string[];
   avatar: string;
+  avatarAsset?: SignedImageAsset;
   city: string;
   rideStyles: string[];
   joinPermission: SquadJoinPermission;

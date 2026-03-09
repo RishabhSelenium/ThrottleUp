@@ -63,12 +63,15 @@ cp .env.example .env
 Optional: use Cloudflare R2 for image uploads (instead of Firebase Storage):
 
 - `EXPO_PUBLIC_IMAGE_STORAGE_PROVIDER=r2`
-- `EXPO_PUBLIC_R2_UPLOAD_BASE_URL=https://<your-worker-subdomain>.workers.dev`
-- `EXPO_PUBLIC_R2_UPLOAD_TOKEN=<upload-token>`
+- `EXPO_PUBLIC_R2_BACKEND_BASE_URL=http://<your-backend-host>:8788`
+- `EXPO_PUBLIC_R2_BACKEND_TOKEN=<backend-token>`
 - `EXPO_PUBLIC_PUSH_FANOUT_BASE_URL=https://<your-worker-subdomain>.workers.dev`
 - `EXPO_PUBLIC_PUSH_FANOUT_TOKEN=<push-fanout-token>`
 
-Worker template: `backend/cloudflare/`
+R2 signer backend: `backend/r2-signer/`
+Push fanout worker: `backend/cloudflare/`
+
+The app stores signed image URLs plus expiry in Firestore and refreshes them automatically when fetched after expiry.
 
 For map-style location suggestions in Create Ride, also set one of:
 

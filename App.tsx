@@ -31,6 +31,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { styles } from './src/app/styles';
 import {
   FriendStatus,
+  getRideLifecycleStatus,
   LocationMode,
   PermissionStatus,
   Theme,
@@ -80,6 +81,7 @@ import {
   RidePost,
   RideTrackingSession,
   RideVisibility,
+  SignedImageAsset,
   Squad,
   SquadJoinPermission,
   User
@@ -312,6 +314,23 @@ const normalizeBikePhotosByName = (
   const entries = Object.entries(bikePhotosByName)
     .map(([bikeName, url]) => [bikeName.trim(), url.trim()] as const)
     .filter(([bikeName, url]) => normalizedGarageNames.has(bikeName) && url.length > 0);
+
+  if (entries.length === 0) return undefined;
+  return Object.fromEntries(entries);
+};
+
+const normalizeBikePhotoAssetsByName = (
+  garage: string[],
+  bikePhotoAssetsByName: Record<string, SignedImageAsset> | undefined
+): Record<string, SignedImageAsset> | undefined => {
+  if (!bikePhotoAssetsByName) return undefined;
+
+  const normalizedGarageNames = new Set(garage.map((bike) => bike.trim()).filter(Boolean));
+  if (normalizedGarageNames.size === 0) return undefined;
+
+  const entries = Object.entries(bikePhotoAssetsByName)
+    .map(([bikeName, asset]) => [bikeName.trim(), asset] as const)
+    .filter(([bikeName, asset]) => normalizedGarageNames.has(bikeName) && Boolean(asset?.objectKey) && Boolean(asset?.signedUrl));
 
   if (entries.length === 0) return undefined;
   return Object.fromEntries(entries);
@@ -3109,6 +3128,7 @@ const AppShell = () => {
 
   const handleRequestToJoinRide = (rideId: string) => {
     let analyticsJoinMode: 'joined' | 'requested' | null = null;
+    let shouldShowRideClosedAlert = false;
     let shouldShowRideFullAlert = false;
     let requestFanoutPayload: { rideId: string; rideTitle: string; creatorId: string } | null = null;
     let rideJoinStateToSync: { rideId: string; currentParticipants: string[]; requests: string[] } | null = null;
@@ -3117,6 +3137,10 @@ const AppShell = () => {
         if (ride.id !== rideId) return ride;
         if (blockedUserIds.has(ride.creatorId)) return ride;
         if (ride.currentParticipants.includes(currentUser.id) || ride.requests.includes(currentUser.id)) return ride;
+        if (getRideLifecycleStatus(ride).joinClosed) {
+          shouldShowRideClosedAlert = true;
+          return ride;
+        }
 
         if (ride.joinPermission === 'anyone') {
           if (ride.currentParticipants.length >= ride.maxParticipants) {
@@ -3168,6 +3192,10 @@ const AppShell = () => {
       return next;
     });
 
+    if (shouldShowRideClosedAlert) {
+      showActionGuardrail('Ride has already started. Joining is closed.');
+    }
+
     if (shouldShowRideFullAlert) {
       showActionGuardrail('Ride is full right now.');
     }
@@ -3211,8 +3239,15 @@ const AppShell = () => {
     const isCreator = ride.creatorId === currentUser.id;
     const isJoined = ride.currentParticipants.includes(currentUser.id);
     const hasPendingRequest = ride.requests.includes(currentUser.id);
+    const isRideClosed = getRideLifecycleStatus(ride).joinClosed;
     if (isCreator || isJoined || hasPendingRequest) {
       setPendingRideJoinRequest(null);
+      return;
+    }
+
+    if (isRideClosed) {
+      setPendingRideJoinRequest(null);
+      showActionGuardrail('This ride has already started. Joining is closed.');
       return;
     }
 
@@ -3268,10 +3303,15 @@ const AppShell = () => {
   ]);
 
   const handleAcceptRideRequest = (rideId: string, userId: string) => {
+    let shouldShowRideClosedAlert = false;
     let rideJoinStateToSync: { rideId: string; currentParticipants: string[]; requests: string[] } | null = null;
     setRides((prev) => {
       const next = prev.map((ride) => {
         if (ride.id !== rideId) return ride;
+        if (getRideLifecycleStatus(ride).joinClosed) {
+          shouldShowRideClosedAlert = true;
+          return ride;
+        }
 
         if (ride.currentParticipants.includes(userId)) {
           const updatedRide = { ...ride, requests: ride.requests.filter((id) => id !== userId) };
@@ -3312,6 +3352,10 @@ const AppShell = () => {
 
       return next;
     });
+
+    if (shouldShowRideClosedAlert) {
+      showActionGuardrail('Ride has already started. New join approvals are disabled.');
+    }
   };
 
   const handleRejectRideRequest = (rideId: string, userId: string) => {
@@ -3518,12 +3562,17 @@ const AppShell = () => {
       ]);
       const normalizedGarage = (updates.garage ?? prev.garage).map((bike) => bike.trim()).filter(Boolean);
       const normalizedBikePhotos = normalizeBikePhotosByName(normalizedGarage, updates.bikePhotosByName ?? prev.bikePhotosByName);
+      const normalizedBikePhotoAssets = normalizeBikePhotoAssetsByName(
+        normalizedGarage,
+        updates.bikePhotoAssetsByName ?? prev.bikePhotoAssetsByName
+      );
 
       const next: User = {
         ...prev,
         ...updates,
         garage: normalizedGarage,
         bikePhotosByName: normalizedBikePhotos,
+        bikePhotoAssetsByName: normalizedBikePhotoAssets,
         ...(normalizedEmergencyContacts.length > 0
           ? {
             sosNumber: normalizedEmergencyContacts[0],
@@ -3546,11 +3595,18 @@ const AppShell = () => {
 
     setIsUploadingProfilePhoto(true);
     try {
-      const uploadedPhotoUrl = FIREBASE_ENABLED ? await uploadProfilePhoto(currentUser.id, localUri) : localUri;
+      const uploadedPhoto = FIREBASE_ENABLED
+        ? await uploadProfilePhoto(currentUser.id, localUri)
+        : {
+          objectKey: localUri,
+          signedUrl: localUri,
+          expiresAt: '2099-12-31T23:59:59.000Z'
+        };
       setCurrentUser((prev) => {
         const next: User = {
           ...prev,
-          avatar: uploadedPhotoUrl
+          avatar: uploadedPhoto.signedUrl,
+          avatarAsset: uploadedPhoto
         };
 
         if (FIREBASE_ENABLED) {
@@ -3572,14 +3628,24 @@ const AppShell = () => {
 
     setUploadingBikeName(normalizedBikeName);
     try {
-      const uploadedPhotoUrl = FIREBASE_ENABLED ? await uploadBikePhoto(currentUser.id, normalizedBikeName, localUri) : localUri;
+      const uploadedPhoto = FIREBASE_ENABLED
+        ? await uploadBikePhoto(currentUser.id, normalizedBikeName, localUri)
+        : {
+          objectKey: localUri,
+          signedUrl: localUri,
+          expiresAt: '2099-12-31T23:59:59.000Z'
+        };
 
       setCurrentUser((prev) => {
         const next: User = {
           ...prev,
           bikePhotosByName: {
             ...(prev.bikePhotosByName ?? {}),
-            [normalizedBikeName]: uploadedPhotoUrl
+            [normalizedBikeName]: uploadedPhoto.signedUrl
+          },
+          bikePhotoAssetsByName: {
+            ...(prev.bikePhotoAssetsByName ?? {}),
+            [normalizedBikeName]: uploadedPhoto
           }
         };
 
@@ -3609,10 +3675,19 @@ const AppShell = () => {
       const rideStyles = uniqueStrings(data.rideStyles.map((style) => style.trim()).filter(Boolean));
       const squadId = `sq-${Date.now()}`;
       let squadAvatar = `https://api.dicebear.com/7.x/identicon/png?seed=${encodeURIComponent(data.name)}`;
+      let squadAvatarAsset: SignedImageAsset | undefined;
 
       if (data.avatarUri) {
         try {
-          squadAvatar = FIREBASE_ENABLED ? await uploadSquadPhoto(squadId, currentUser.id, data.avatarUri) : data.avatarUri;
+          const uploadedAvatar = FIREBASE_ENABLED
+            ? await uploadSquadPhoto(squadId, currentUser.id, data.avatarUri)
+            : {
+              objectKey: data.avatarUri,
+              signedUrl: data.avatarUri,
+              expiresAt: '2099-12-31T23:59:59.000Z'
+            };
+          squadAvatar = uploadedAvatar.signedUrl;
+          squadAvatarAsset = uploadedAvatar;
         } catch {
           Alert.alert('Upload failed', 'Squad photo upload failed. Using a default squad avatar.');
         }
@@ -3626,6 +3701,7 @@ const AppShell = () => {
         members: [currentUser.id],
         adminIds: [],
         avatar: squadAvatar,
+        avatarAsset: squadAvatarAsset,
         city: currentUser.city,
         rideStyles: rideStyles.length > 0 ? rideStyles : ['Touring'],
         joinPermission: data.joinPermission,
