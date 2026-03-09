@@ -54,7 +54,17 @@
           "photosPermission": "Allow ThrottleUp to access your photos so you can upload profile, squad, and bike images."
         }
       ],
-      "expo-notifications"
+      [
+        "expo-notifications",
+        {
+          "icon": "./src/assets/logo.png",
+          "color": "#F97316",
+          "sounds": [
+            "./src/assets/Ride_notification.mp3",
+            "./src/assets/msg_notification.mp3"
+          ]
+        }
+      ]
     ],
     "web": {
       "bundler": "metro"
