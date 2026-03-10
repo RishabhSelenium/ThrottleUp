@@ -152,19 +152,33 @@ export const RideCard = ({
     <AnimatedTouchableOpacity
       style={[
         styles.rideCard,
-        { backgroundColor: t.card },
+        { backgroundColor: t.card, borderColor: t.border },
         isUpcomingSoon ? {
-          borderColor: animatedBorderColor,
-          borderWidth: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.5] }),
           elevation: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 6] }),
           shadowColor: t.primary,
           shadowOffset: { width: 0, height: 0 },
           shadowOpacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] }),
           shadowRadius: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 12] })
-        } : { borderColor: t.border }
+        } : {}
       ]}
       onPress={() => onOpenDetail(ride)}
     >
+      {isUpcomingSoon && (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            borderRadius: 12, // Matches rideCard border radius
+            borderWidth: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.5] }),
+            borderColor: animatedBorderColor,
+            zIndex: 10,
+          }}
+        />
+      )}
 
       <View style={styles.rideCardCover}>
         <Image
