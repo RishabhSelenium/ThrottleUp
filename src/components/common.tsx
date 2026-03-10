@@ -61,12 +61,63 @@ export const RideCard = ({
 
   const rideLifecycle = getRideLifecycleStatus(ride);
   const rideStartDt = getRideStartDateTime(ride);
-  const now = Date.now();
-  const startsAtTime = rideStartDt?.getTime() ?? rideLifecycle.startsAt?.getTime();
-  const isUpcomingSoon = !!startsAtTime && (startsAtTime - now) > 0 && (startsAtTime - now) < 24 * 60 * 60 * 1000;
 
-  const dateLabel = rideStartDt
-    ? rideStartDt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })
+  // Hermes-safe manual date parser for labels like "Tue | Mar 10" or "Mar 10"
+  const parseRideDateManually = (): Date | null => {
+    const dateStr = (ride.startDate?.trim() || ride.date?.trim() || '');
+    if (!dateStr) return null;
+
+    // Try ISO format first (2026-03-10)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+
+    // Strip prefix like "Tue | " or "Wed | "
+    const cleaned = dateStr.replace(/^[A-Za-z]{3}\s*\|\s*/, '').trim();
+    const months: Record<string, number> = {
+      Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+      Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11
+    };
+    const match = cleaned.match(/^([A-Za-z]{3})\s+(\d{1,2})(?:\s+'?(\d{2,4}))?$/);
+    if (!match) return null;
+    const month = months[match[1]];
+    if (month === undefined) return null;
+    const day = Number(match[2]);
+    const yearPart = match[3] ? Number(match[3]) : new Date().getFullYear();
+    const year = yearPart < 100 ? 2000 + yearPart : yearPart;
+    return new Date(year, month, day);
+  };
+
+  const parsedDate = rideStartDt ?? parseRideDateManually();
+  const now = Date.now();
+
+  // For the glow check, combine the parsed date with the ride time
+  let startsAtMs: number | null = null;
+  if (rideStartDt) {
+    startsAtMs = rideStartDt.getTime();
+  } else if (parsedDate) {
+    // Try to add time from flagOffTime/startTime
+    const timeStr = (ride.flagOffTime?.trim() || ride.startTime?.trim() || '');
+    const timeMatch = timeStr.match(/^(\d{1,2}):(\d{2})\s*([AP]M)$/i);
+    if (timeMatch) {
+      const h = Number(timeMatch[1]) % 12 + (timeMatch[3].toUpperCase() === 'PM' ? 12 : 0);
+      const m = Number(timeMatch[2]);
+      const dt = new Date(parsedDate);
+      dt.setHours(h, m, 0, 0);
+      startsAtMs = dt.getTime();
+    } else {
+      // No time info, assume end of day
+      const dt = new Date(parsedDate);
+      dt.setHours(23, 59, 0, 0);
+      startsAtMs = dt.getTime();
+    }
+  }
+
+  const isUpcomingSoon = !!startsAtMs && (startsAtMs - now) > 0 && (startsAtMs - now) < 24 * 60 * 60 * 1000;
+
+  const dateLabel = parsedDate
+    ? `${parsedDate.getDate()} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][parsedDate.getMonth()]} '${String(parsedDate.getFullYear()).slice(-2)}`
     : (ride.startDate?.trim() || ride.date?.trim() || '');
 
   const glowAnim = useRef(new Animated.Value(0)).current;
