@@ -955,16 +955,16 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 14,
     padding: 10,
-    gap: 10
+    gap: 12
   },
   routeMapFrame: {
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     overflow: 'hidden'
   },
   routeMap: {
     width: '100%',
-    height: 220
+    height: 320
   },
   mapUnavailable: {
     borderWidth: 1,
@@ -1003,7 +1003,7 @@ export const styles = StyleSheet.create({
   },
   routePickerMap: {
     width: '100%',
-    height: 300
+    height: 480
   },
   routePickerActionRow: {
     flexDirection: 'row',

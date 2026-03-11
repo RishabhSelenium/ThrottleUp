@@ -7,6 +7,7 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  LayoutChangeEvent,
   Linking,
   Modal,
   Platform,
@@ -81,26 +82,50 @@ type RoutePressEvent = {
   };
 };
 
+type RouteMapPadding = {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+};
+
+type RouteMapViewRef = {
+  fitToCoordinates?: (
+    coordinates: RouteCoordinate[],
+    options?: {
+      edgePadding?: RouteMapPadding;
+      animated?: boolean;
+    }
+  ) => void;
+  pointForCoordinate?: (coordinate: RouteCoordinate) => Promise<{ x: number; y: number }>;
+};
+
+type RouteMapViewProps = {
+  style?: unknown;
+  initialRegion: RouteMapRegion;
+  zoomEnabled?: boolean;
+  rotateEnabled?: boolean;
+  pitchEnabled?: boolean;
+  toolbarEnabled?: boolean;
+  mapPadding?: RouteMapPadding;
+  scrollEnabled?: boolean;
+  onPress?: (event: RoutePressEvent) => void;
+  onLongPress?: (event: RoutePressEvent) => void;
+  onMapReady?: () => void;
+  children?: React.ReactNode;
+};
+
 type RouteMapModule = {
-  MapView: React.ComponentType<{
-    style?: unknown;
-    initialRegion: RouteMapRegion;
-    mapPadding?: {
-      top: number;
-      right: number;
-      bottom: number;
-      left: number;
-    };
-    scrollEnabled?: boolean;
-    onPress?: (event: RoutePressEvent) => void;
-    onLongPress?: (event: RoutePressEvent) => void;
-    children?: React.ReactNode;
-  }>;
+  MapView: React.ComponentType<RouteMapViewProps & { ref?: React.Ref<RouteMapViewRef | null> }>;
   Marker: React.ComponentType<{
     coordinate: RouteCoordinate;
     title?: string;
     description?: string;
     pinColor?: string;
+    anchor?: { x: number; y: number };
+    tracksViewChanges?: boolean;
+    onPress?: () => void;
+    children?: React.ReactNode;
   }>;
   Polyline: React.ComponentType<{
     coordinates: RouteCoordinate[];
@@ -192,12 +217,25 @@ type GoogleDirectionsResponse = {
   error_message?: string;
 };
 
+type GoogleGeocodeResponse = {
+  status?: string;
+  results?: Array<{
+    formatted_address?: string;
+  }>;
+  error_message?: string;
+};
+
 type OpenStreetMapGeocodeResponse = Array<{
   lat?: string;
   lon?: string;
   display_name?: string;
   name?: string;
 }>;
+
+type OpenStreetMapReverseGeocodeResponse = {
+  display_name?: string;
+  name?: string;
+};
 
 type OsrmRouteResponse = {
   code?: string;
@@ -371,7 +409,54 @@ const dedupeRoutePointsByCoordinate = (points: MapPoint[]): MapPoint[] => {
 const toRouteCoordinates = (points: MapPoint[]): RouteCoordinate[] =>
   points.map((point) => ({ latitude: point.lat, longitude: point.lng, label: point.label }));
 
-const buildRouteRegion = (coordinates: RouteCoordinate[]): RouteMapRegion => {
+const ROUTE_MAP_PADDING: RouteMapPadding = { top: 30, right: 12, bottom: 14, left: 12 };
+const ROUTE_MAP_EDGE_PADDING: RouteMapPadding = { top: 44, right: 14, bottom: 18, left: 14 };
+const COORDINATE_LABEL_PATTERN = /^-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?$/;
+
+const toShortRouteMarkerLabel = (value: string | undefined, fallback: string): string => {
+  const normalized = value?.replace(/\s+/g, ' ').trim() ?? '';
+  if (!normalized) return fallback;
+  if (COORDINATE_LABEL_PATTERN.test(normalized)) return fallback;
+
+  const cleaned = normalized
+    .replace(/^(ride\s*starts?|ride\s*ends?|destination)\s*[:-]\s*/i, '')
+    .trim();
+  const firstChunk = cleaned
+    .split(',')
+    .map((chunk) => chunk.trim())
+    .filter(Boolean)[0];
+  const candidate = (firstChunk || cleaned).replace(/\s+/g, ' ').trim();
+  if (!candidate) return fallback;
+  if (candidate.length <= 18) return candidate;
+  return `${candidate.slice(0, 17).trimEnd()}...`;
+};
+
+const getRouteMarkerBubbleMetrics = (label: string): { width: number; fontSize: number } => {
+  const normalizedLength = Math.max(4, label.trim().length);
+  const cappedLength = Math.min(20, normalizedLength);
+  const width = Math.max(92, Math.min(176, Math.round(cappedLength * 8.4 + 24)));
+  const fontSize = normalizedLength > 14 ? 9 : 10;
+
+  return {
+    width,
+    fontSize
+  };
+};
+
+const isAndroidMarkerTextOverlayEnabled = Platform.OS === 'android';
+
+const buildRouteRegion = (
+  coordinates: RouteCoordinate[],
+  options?: {
+    paddingScale?: number;
+    paddingDelta?: number;
+    minDelta?: number;
+  }
+): RouteMapRegion => {
+  const paddingScale = Number.isFinite(options?.paddingScale ?? NaN) ? Math.max(1, Number(options?.paddingScale)) : 1;
+  const paddingDelta = Number.isFinite(options?.paddingDelta ?? NaN) ? Math.max(0, Number(options?.paddingDelta)) : 0.08;
+  const minDelta = Number.isFinite(options?.minDelta ?? NaN) ? Math.max(0.005, Number(options?.minDelta)) : 0.02;
+
   if (coordinates.length === 0) {
     return {
       latitude: 28.6139,
@@ -392,8 +477,8 @@ const buildRouteRegion = (coordinates: RouteCoordinate[]): RouteMapRegion => {
   return {
     latitude: (minLat + maxLat) / 2,
     longitude: (minLng + maxLng) / 2,
-    latitudeDelta: Math.max(maxLat - minLat + 0.08, 0.02),
-    longitudeDelta: Math.max(maxLng - minLng + 0.08, 0.02)
+    latitudeDelta: Math.max((maxLat - minLat) * paddingScale + paddingDelta, minDelta),
+    longitudeDelta: Math.max((maxLng - minLng) * paddingScale + paddingDelta, minDelta)
   };
 };
 
@@ -456,6 +541,22 @@ const buildGoogleDirectionsUrlFromRoute = ({
 
 const buildRouteTextFromPoints = (points: MapPoint[]): string =>
   points.map((point, index) => point.label ?? `Stop ${index + 1}`).join(' -> ');
+
+const promptOpenRouteInGoogleMaps = (url: string | null): void => {
+  if (!url) return;
+
+  Alert.alert('Open route in Google Maps?', 'Do you want to continue with this route in Google Maps?', [
+    { text: 'Cancel', style: 'cancel' },
+    {
+      text: 'Open',
+      onPress: () => {
+        void Linking.openURL(url).catch(() => {
+          Alert.alert('Unable to open maps', 'Please try again in a moment.');
+        });
+      }
+    }
+  ]);
+};
 
 const getAndroidTopInset = (insets: { top: number }): number => (Platform.OS === 'android' ? Math.max(insets.top, 8) : 0);
 
@@ -893,6 +994,58 @@ const fetchOpenStreetMapGeocodePoint = async (label: string): Promise<MapPoint |
   } catch {
     return null;
   }
+};
+
+const fetchGoogleReverseGeocodeLabel = async (point: Pick<MapPoint, 'lat' | 'lng'>, apiKey: string): Promise<string | null> => {
+  if (!apiKey.trim()) return null;
+
+  try {
+    const params = new URLSearchParams({
+      latlng: `${point.lat},${point.lng}`,
+      language: 'en',
+      key: apiKey
+    });
+    const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`);
+    if (!response.ok) return null;
+
+    const payload = (await response.json()) as GoogleGeocodeResponse;
+    if (payload.status !== 'OK') return null;
+
+    const firstResult = payload.results?.[0]?.formatted_address?.trim();
+    return firstResult && firstResult.length > 0 ? firstResult : null;
+  } catch {
+    return null;
+  }
+};
+
+const fetchOpenStreetMapReverseGeocodeLabel = async (point: Pick<MapPoint, 'lat' | 'lng'>): Promise<string | null> => {
+  try {
+    const params = new URLSearchParams({
+      format: 'jsonv2',
+      lat: String(point.lat),
+      lon: String(point.lng)
+    });
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': 'en',
+        'User-Agent': 'RideSathiReact/1.0'
+      }
+    });
+    if (!response.ok) return null;
+
+    const payload = (await response.json()) as OpenStreetMapReverseGeocodeResponse;
+    const label = payload.display_name?.trim() || payload.name?.trim();
+    return label && label.length > 0 ? label : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolvePointDisplayLabel = async (point: Pick<MapPoint, 'lat' | 'lng'>, apiKey: string): Promise<string | null> => {
+  const googleLabel = await fetchGoogleReverseGeocodeLabel(point, apiKey);
+  if (googleLabel) return googleLabel;
+  return fetchOpenStreetMapReverseGeocodeLabel(point);
 };
 
 const parseGoogleDirectionsEstimate = (route: GoogleDirectionsRoute): RouteEstimate | null => {
@@ -1710,6 +1863,7 @@ export const CreateRideModal = ({
   const [rideNote, setRideNote] = useState(DEFAULT_RIDE_NOTE);
   const [inviteAudience, setInviteAudience] = useState<InviteAudience>('groups');
   const [isPrivateRide, setIsPrivateRide] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   const [rideJoinPermission, setRideJoinPermission] = useState<RideJoinPermission>('anyone');
   const [hasRiderLimit, setHasRiderLimit] = useState(false);
   const [maxParticipants, setMaxParticipants] = useState('5');
@@ -1748,10 +1902,26 @@ export const CreateRideModal = ({
   const [routePreviewPathCoordinates, setRoutePreviewPathCoordinates] = useState<RouteCoordinate[] | null>(null);
   const [isRouteEstimateLoading, setIsRouteEstimateLoading] = useState(false);
   const [routeEstimateError, setRouteEstimateError] = useState<string | null>(null);
+  const [isRoutePreviewMapReady, setIsRoutePreviewMapReady] = useState(Platform.OS === 'web');
+  const [routePreviewMapSize, setRoutePreviewMapSize] = useState({ width: 0, height: 0 });
+  const [routePreviewOverlayLabels, setRoutePreviewOverlayLabels] = useState<
+    Array<{
+      key: string;
+      label: string;
+      color: string;
+      width: number;
+      fontSize: number;
+      left: number;
+      top: number;
+    }>
+  >([]);
   const rideNoteInputRef = useRef<TextInput | null>(null);
+  const routePreviewMapRef = useRef<RouteMapViewRef | null>(null);
   const googleAutocompleteRequestRef = useRef(0);
   const routeEstimateRequestRef = useRef(0);
   const stopPickerSeedRequestRef = useRef(0);
+  const rideStartPointLabelRequestRef = useRef(0);
+  const rideEndPointLabelRequestRef = useRef(0);
   const inclusionOptions = RIDE_INCLUSION_OPTIONS;
   const trendingDestinations = useMemo(() => getTrendingDestinationsForCity(currentCity), [currentCity]);
   const normalizedCurrentCity = currentCity.trim();
@@ -1858,6 +2028,8 @@ export const CreateRideModal = ({
     setRouteEstimateError(null);
     routeEstimateRequestRef.current += 1;
     stopPickerSeedRequestRef.current += 1;
+    rideStartPointLabelRequestRef.current += 1;
+    rideEndPointLabelRequestRef.current += 1;
   };
 
   useEffect(() => {
@@ -1939,6 +2111,8 @@ export const CreateRideModal = ({
     setRouteEstimateError(null);
     routeEstimateRequestRef.current += 1;
     stopPickerSeedRequestRef.current += 1;
+    rideStartPointLabelRequestRef.current += 1;
+    rideEndPointLabelRequestRef.current += 1;
   }, [initialRide, visible]);
 
   useEffect(() => {
@@ -2070,6 +2244,44 @@ export const CreateRideModal = ({
   }, [destinationLabel, destinationPoint]);
 
   useEffect(() => {
+    if (!rideStartPoint) return;
+
+    const coordinateLabelPoint = parseCoordinateLabelPoint(rideStartsAt);
+    if (!coordinateLabelPoint) return;
+    if (!areRoutePointsAtSameCoordinate(coordinateLabelPoint, rideStartPoint)) return;
+
+    const requestId = rideStartPointLabelRequestRef.current + 1;
+    rideStartPointLabelRequestRef.current = requestId;
+
+    (async () => {
+      const resolvedLabel = await resolvePointDisplayLabel(rideStartPoint, GOOGLE_PLACES_KEY);
+      if (requestId !== rideStartPointLabelRequestRef.current) return;
+      if (!resolvedLabel?.trim()) return;
+      setRideStartsAt(resolvedLabel.trim());
+      saveDestination(resolvedLabel.trim());
+    })();
+  }, [rideStartPoint, rideStartsAt]);
+
+  useEffect(() => {
+    if (!rideEndPoint) return;
+
+    const coordinateLabelPoint = parseCoordinateLabelPoint(rideEndsAt);
+    if (!coordinateLabelPoint) return;
+    if (!areRoutePointsAtSameCoordinate(coordinateLabelPoint, rideEndPoint)) return;
+
+    const requestId = rideEndPointLabelRequestRef.current + 1;
+    rideEndPointLabelRequestRef.current = requestId;
+
+    (async () => {
+      const resolvedLabel = await resolvePointDisplayLabel(rideEndPoint, GOOGLE_PLACES_KEY);
+      if (requestId !== rideEndPointLabelRequestRef.current) return;
+      if (!resolvedLabel?.trim()) return;
+      setRideEndsAt(resolvedLabel.trim());
+      saveDestination(resolvedLabel.trim());
+    })();
+  }, [rideEndPoint, rideEndsAt]);
+
+  useEffect(() => {
     const startLabel = rideStartsAt.trim();
     const endLabel = rideEndsAt.trim();
     if (!startLabel || !endLabel) {
@@ -2175,12 +2387,37 @@ export const CreateRideModal = ({
     })),
     ...(rideEndPoint ? [{ ...rideEndPoint, label: 'Ride ends' }] : [])
   ];
+  const routePreviewMarkerLabels = routePreviewPoints.map((point, index) => {
+    const isStart = index === 0;
+    const isEnd = index === routePreviewPoints.length - 1;
+
+    if (isStart) {
+      return toShortRouteMarkerLabel(rideStartsAt || point.label, 'Start');
+    }
+
+    if (isEnd) {
+      return toShortRouteMarkerLabel(rideEndsAt || point.label, 'End');
+    }
+
+    return toShortRouteMarkerLabel(point.label, `Stop ${index + 1}`);
+  });
   const routePreviewBaseCoordinates = toRouteCoordinates(routePreviewPoints);
+  const routePreviewMarkerColors = routePreviewBaseCoordinates.map((_, index) => {
+    const isStart = index === 0;
+    const isEnd = index === routePreviewBaseCoordinates.length - 1;
+    return isStart ? TOKENS[theme].green : isEnd ? TOKENS[theme].red : accent;
+  });
+  const routePreviewMarkerLabelKey = routePreviewMarkerLabels.join('|');
+  const routePreviewMarkerColorKey = routePreviewMarkerColors.join('|');
   const routePreviewPolylineCoordinates = routePreviewPathCoordinates ?? routePreviewBaseCoordinates;
   const firstPreviewCoordinate = routePreviewPolylineCoordinates[0];
   const lastPreviewCoordinate =
     routePreviewPolylineCoordinates.length > 0 ? routePreviewPolylineCoordinates[routePreviewPolylineCoordinates.length - 1] : null;
-  const routePreviewRegion = buildRouteRegion(routePreviewPolylineCoordinates);
+  const routePreviewRegion = buildRouteRegion(routePreviewPolylineCoordinates, {
+    paddingScale: 1.04,
+    paddingDelta: 0.015,
+    minDelta: 0.008
+  });
   const routePreviewMapKey = [
     routePreviewPoints.map((point) => `${point.lat}:${point.lng}`).join('|'),
     routePreviewPathCoordinates ? 'live' : 'point',
@@ -2188,6 +2425,96 @@ export const CreateRideModal = ({
     firstPreviewCoordinate ? `${firstPreviewCoordinate.latitude}:${firstPreviewCoordinate.longitude}` : '',
     lastPreviewCoordinate ? `${lastPreviewCoordinate.latitude}:${lastPreviewCoordinate.longitude}` : ''
   ].join('::');
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    setIsRoutePreviewMapReady(false);
+  }, [routePreviewMapKey]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!routeMapModule || !isRoutePreviewMapReady) return;
+    if (routePreviewPolylineCoordinates.length < 2) return;
+
+    const animationFrame = requestAnimationFrame(() => {
+      routePreviewMapRef.current?.fitToCoordinates?.(routePreviewPolylineCoordinates, {
+        edgePadding: ROUTE_MAP_EDGE_PADDING,
+        animated: false
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(animationFrame);
+    };
+  }, [isRoutePreviewMapReady, routePreviewMapKey, routePreviewPolylineCoordinates]);
+
+  useEffect(() => {
+    if (!isAndroidMarkerTextOverlayEnabled) {
+      setRoutePreviewOverlayLabels([]);
+      return;
+    }
+    if (!routeMapModule || !isRoutePreviewMapReady) return;
+    if (routePreviewBaseCoordinates.length === 0 || routePreviewMapSize.width <= 0 || routePreviewMapSize.height <= 0) {
+      setRoutePreviewOverlayLabels([]);
+      return;
+    }
+
+    let isCanceled = false;
+    const timeoutId = setTimeout(() => {
+      const mapRef = routePreviewMapRef.current;
+      if (!mapRef?.pointForCoordinate) return;
+
+      void (async () => {
+        try {
+          const positionedLabels = await Promise.all(
+            routePreviewBaseCoordinates.map(async (coordinate, index) => {
+              const projectedPoint = await mapRef.pointForCoordinate?.(coordinate);
+              if (!projectedPoint) return null;
+
+              const label = routePreviewMarkerLabels[index] ?? `Stop ${index + 1}`;
+              const color = routePreviewMarkerColors[index] ?? accent;
+              const metrics = getRouteMarkerBubbleMetrics(label);
+              const bubbleWidth = metrics.width;
+              const bubbleHeight = 34;
+              const left = Math.max(6, Math.min(routePreviewMapSize.width - bubbleWidth - 6, projectedPoint.x - bubbleWidth / 2));
+              const top = Math.max(6, Math.min(routePreviewMapSize.height - bubbleHeight - 6, projectedPoint.y - 44));
+
+              return {
+                key: `${coordinate.latitude}-${coordinate.longitude}-${index}-${label}`,
+                label,
+                color,
+                width: bubbleWidth,
+                fontSize: metrics.fontSize,
+                left,
+                top
+              };
+            })
+          );
+          if (isCanceled) return;
+
+          setRoutePreviewOverlayLabels(positionedLabels.filter((item): item is NonNullable<typeof item> => item !== null));
+        } catch {
+          if (!isCanceled) {
+            setRoutePreviewOverlayLabels([]);
+          }
+        }
+      })();
+    }, 210);
+
+    return () => {
+      isCanceled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [
+    accent,
+    isRoutePreviewMapReady,
+    routePreviewMapKey,
+    routePreviewMapSize.height,
+    routePreviewMapSize.width,
+    routePreviewMarkerColorKey,
+    routePreviewMarkerLabelKey,
+  ]);
+
   const routeCoordinatePointCount = (rideStartPoint ? 1 : 0) + routeIntermediatePoints.length + (rideEndPoint ? 1 : 0);
   const hasEnoughRouteCoordinatePoints = routeCoordinatePointCount >= 2;
   const hasStartEndLabels = rideStartsAt.trim().length > 0 && rideEndsAt.trim().length > 0;
@@ -2197,6 +2524,14 @@ export const CreateRideModal = ({
       ? 'Unable to fetch live map estimate right now. Route points are ready, so retry in a moment.'
       : 'Set start/end points on map for a reliable estimate when live map lookup is unavailable.';
   const routeEstimateMeta = routeEstimate?.source === 'google' ? 'Live map estimate' : routeEstimate?.source === 'fallback' ? 'Map-point estimate' : null;
+  const routePreviewDirectionsUrl =
+    buildGoogleDirectionsUrlFromRoute({
+      startLabel: rideStartsAt.trim(),
+      endLabel: rideEndsAt.trim(),
+      startPoint: rideStartPoint,
+      endPoint: rideEndPoint,
+      intermediatePoints: routeIntermediatePoints
+    }) ?? buildGoogleDirectionsUrl(routePreviewBaseCoordinates);
   const numericPrice = Number(pricePerPerson);
   const numericSplitTotal = Number(splitTotalAmount);
   const resolvedUpiPaymentLink = resolveUpiDestination(upiPaymentInput);
@@ -2285,6 +2620,10 @@ export const CreateRideModal = ({
     });
 
     resetForm();
+  };
+
+  const handleRoutePreviewMapPress = () => {
+    promptOpenRouteInGoogleMaps(routePreviewDirectionsUrl);
   };
 
   const handleDestinationSelected = (value: string, point: MapPoint | null = null) => {
@@ -2496,16 +2835,33 @@ export const CreateRideModal = ({
   const applyRidePointFromMap = () => {
     if (!draftRidePoint) return;
 
-    const formattedLabel = `${draftRidePoint.lat.toFixed(4)}, ${draftRidePoint.lng.toFixed(4)}`;
-    if (locationPickerContext === 'rideStarts') {
-      setRideStartPoint({ ...draftRidePoint, label: 'Ride starts' });
-      setRideStartsAt(formattedLabel);
+    const selectedPoint = { ...draftRidePoint };
+    const fallbackLabel = `${selectedPoint.lat.toFixed(4)}, ${selectedPoint.lng.toFixed(4)}`;
+    const isStartSelection = locationPickerContext === 'rideStarts';
+
+    if (isStartSelection) {
+      setRideStartPoint({ ...selectedPoint, label: 'Ride starts' });
+      setRideStartsAt(fallbackLabel);
     } else if (locationPickerContext === 'rideEnds') {
-      setRideEndPoint({ ...draftRidePoint, label: 'Ride ends' });
-      setRideEndsAt(formattedLabel);
+      setRideEndPoint({ ...selectedPoint, label: 'Ride ends' });
+      setRideEndsAt(fallbackLabel);
     }
 
-    saveDestination(formattedLabel);
+    const requestRef = isStartSelection ? rideStartPointLabelRequestRef : rideEndPointLabelRequestRef;
+    const requestId = requestRef.current + 1;
+    requestRef.current = requestId;
+    (async () => {
+      const resolvedLabel = await resolvePointDisplayLabel(selectedPoint, GOOGLE_PLACES_KEY);
+      if (requestId !== requestRef.current) return;
+      const finalLabel = resolvedLabel?.trim() || fallbackLabel;
+      if (isStartSelection) {
+        setRideStartsAt(finalLabel);
+      } else {
+        setRideEndsAt(finalLabel);
+      }
+      saveDestination(finalLabel);
+    })();
+
     setIsRidePointPickerOpen(false);
   };
 
@@ -3190,17 +3546,7 @@ export const CreateRideModal = ({
                   </View>
                 </View>
 
-                <TouchableOpacity
-                  style={[createRideWizardStyles.routeMapButton, { borderColor: t.border, backgroundColor: t.surface }]}
-                  onPress={handleOpenStopPicker}
-                >
-                  <MaterialCommunityIcons name="map-marker-path" size={18} color={accent} />
-                  <Text style={[createRideWizardStyles.routeMapButtonText, { color: accent }]}>
-                    {routePoints.length > 0 ? `Edit route on map (${routePoints.length})` : 'Add route on map'}
-                  </Text>
-                </TouchableOpacity>
-
-                {routePreviewPoints.length > 0 && (
+                 {routePreviewPoints.length > 0 && (
                   <View style={[styles.routeMapCard, { borderColor: t.border, backgroundColor: t.subtle }]}>
                     <View style={styles.rowBetween}>
                       <Text style={[styles.inputLabel, { color: t.muted, marginBottom: 0 }]}>Route Preview</Text>
@@ -3211,26 +3557,110 @@ export const CreateRideModal = ({
                     </View>
 
                     {routeMapModule ? (
-                      <View style={[styles.routeMapFrame, { borderColor: t.border }]}>
-                        <routeMapModule.MapView key={routePreviewMapKey} style={styles.routeMap} initialRegion={routePreviewRegion}>
+                      <View
+                        style={[styles.routeMapFrame, { borderColor: t.border }]}
+                        onLayout={(event: LayoutChangeEvent) => {
+                          const { width, height } = event.nativeEvent.layout;
+                          const roundedWidth = Math.round(width);
+                          const roundedHeight = Math.round(height);
+                          setRoutePreviewMapSize((previous) =>
+                            previous.width === roundedWidth && previous.height === roundedHeight
+                              ? previous
+                              : { width: roundedWidth, height: roundedHeight }
+                          );
+                        }}
+                      >
+                        <routeMapModule.MapView
+                          key={routePreviewMapKey}
+                          ref={Platform.OS === 'web' ? undefined : routePreviewMapRef}
+                          style={styles.routeMap}
+                          initialRegion={routePreviewRegion}
+                          scrollEnabled={false}
+                          zoomEnabled={false}
+                          rotateEnabled={false}
+                          pitchEnabled={false}
+                          toolbarEnabled={false}
+                          onMapReady={() => setIsRoutePreviewMapReady(true)}
+                          onPress={handleRoutePreviewMapPress}
+                          mapPadding={ROUTE_MAP_PADDING}
+                        >
                           {routePreviewPolylineCoordinates.length > 1 && (
                             <routeMapModule.Polyline coordinates={routePreviewPolylineCoordinates} strokeWidth={4} strokeColor={accent} />
                           )}
                           {routePreviewBaseCoordinates.map((point, index) => {
                             const isStart = index === 0;
                             const isEnd = index === routePreviewBaseCoordinates.length - 1;
+                            const labelText = routePreviewMarkerLabels[index] ?? `Stop ${index + 1}`;
+                            const markerBubbleMetrics = getRouteMarkerBubbleMetrics(labelText);
                             const markerColor = isStart ? TOKENS[theme].green : isEnd ? TOKENS[theme].red : accent;
 
                             return (
                               <routeMapModule.Marker
-                                key={`${point.latitude}-${point.longitude}-${index}`}
+                                key={`${point.latitude}-${point.longitude}-${index}-${labelText}`}
                                 coordinate={point}
-                                title={routePreviewPoints[index]?.label ?? `Waypoint ${index + 1}`}
-                                pinColor={markerColor}
-                              />
+                                anchor={{ x: 0.5, y: 1 }}
+                                tracksViewChanges={Platform.OS === 'android'}
+                                onPress={handleRoutePreviewMapPress}
+                              >
+                                <View collapsable={false} style={{ alignItems: 'center' }}>
+                                  {!isAndroidMarkerTextOverlayEnabled && (
+                                    <View style={{ backgroundColor: markerColor, width: markerBubbleMetrics.width, minHeight: 34, paddingHorizontal: 10, justifyContent: 'center', paddingVertical: 7, borderRadius: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4 }}>
+                                      <Text allowFontScaling={false} style={[styles.metaText, { width: '100%', color: '#fff', fontSize: markerBubbleMetrics.fontSize, lineHeight: markerBubbleMetrics.fontSize + 2, textAlign: 'center' }]}>
+                                        {labelText}
+                                      </Text>
+                                    </View>
+                                  )}
+                                  {!isAndroidMarkerTextOverlayEnabled && (
+                                    <View style={{ width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid', borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 8, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: markerColor }} />
+                                  )}
+                                  <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: markerColor, borderWidth: 2, borderColor: '#fff' }} />
+                                </View>
+                              </routeMapModule.Marker>
                             );
                           })}
                         </routeMapModule.MapView>
+                        {isAndroidMarkerTextOverlayEnabled && routePreviewOverlayLabels.length > 0 && (
+                          <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+                            {routePreviewOverlayLabels.map((overlayItem) => (
+                              <View
+                                key={overlayItem.key}
+                                style={{
+                                  position: 'absolute',
+                                  left: overlayItem.left,
+                                  top: overlayItem.top,
+                                  backgroundColor: overlayItem.color,
+                                  width: overlayItem.width,
+                                  minHeight: 34,
+                                  paddingHorizontal: 10,
+                                  justifyContent: 'center',
+                                  paddingVertical: 7,
+                                  borderRadius: 8,
+                                  shadowColor: '#000',
+                                  shadowOffset: { width: 0, height: 2 },
+                                  shadowOpacity: 0.2,
+                                  shadowRadius: 3,
+                                  elevation: 4
+                                }}
+                              >
+                                <Text
+                                  allowFontScaling={false}
+                                  style={[
+                                    styles.metaText,
+                                    {
+                                      width: '100%',
+                                      color: '#fff',
+                                      fontSize: overlayItem.fontSize,
+                                      lineHeight: overlayItem.fontSize + 2,
+                                      textAlign: 'center'
+                                    }
+                                  ]}
+                                >
+                                  {overlayItem.label}
+                                </Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
                       </View>
                     ) : (
                       <View style={[styles.mapUnavailable, { borderColor: t.border, backgroundColor: t.surface }]}>
@@ -3239,25 +3669,6 @@ export const CreateRideModal = ({
                       </View>
                     )}
 
-                    <View style={styles.routePointList}>
-                      {routePreviewPoints.map((point, index) => {
-                        const isStart = index === 0;
-                        const isEnd = index === routePreviewPoints.length - 1;
-                        const dotColor = isStart ? TOKENS[theme].green : isEnd ? TOKENS[theme].red : accent;
-
-                        return (
-                          <View key={`${point.lat}-${point.lng}-${index}`} style={styles.routePointRow}>
-                            <View style={[styles.routePointDot, { backgroundColor: dotColor }]} />
-                            <View style={styles.flex1}>
-                              <Text style={[styles.boldText, { color: t.text }]}>{point.label ?? `Waypoint ${index + 1}`}</Text>
-                              <Text style={[styles.metaText, { color: t.muted }]}>
-                                {point.lat.toFixed(4)}, {point.lng.toFixed(4)}
-                              </Text>
-                            </View>
-                          </View>
-                        );
-                      })}
-                    </View>
                   </View>
                 )}
 
@@ -5426,6 +5837,20 @@ export const RideDetailScreen = ({
   const t = TOKENS[theme];
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === 'ios' ? insets.top : getAndroidTopInset(insets);
+  const [routeDetailMapSize, setRouteDetailMapSize] = useState({ width: 0, height: 0 });
+  const [routeDetailOverlayLabels, setRouteDetailOverlayLabels] = useState<
+    Array<{
+      key: string;
+      label: string;
+      color: string;
+      width: number;
+      fontSize: number;
+      left: number;
+      top: number;
+    }>
+  >([]);
+  const routeDetailMapRef = useRef<RouteMapViewRef | null>(null);
+  const routeDetailOverlayRequestRef = useRef(0);
 
   if (!ride) return null;
 
@@ -5589,7 +6014,35 @@ export const RideDetailScreen = ({
   } = splitRoutePointRoles(routePoints);
   const startCheckpoint = routePoints[0] ?? null;
   const routeCoordinates = toRouteCoordinates(routePoints);
-  const routeRegion = buildRouteRegion(routeCoordinates);
+  const routeMapMarkerLabels = routePoints.map((point, index) => {
+    const isStart = index === 0;
+    const isEnd = index === routePoints.length - 1;
+
+    if (isStart) {
+      return toShortRouteMarkerLabel(ride.startLocation ?? point.label, 'Start');
+    }
+
+    if (isEnd) {
+      return toShortRouteMarkerLabel(ride.endLocation ?? point.label, 'End');
+    }
+
+    return toShortRouteMarkerLabel(point.label, `Stop ${index + 1}`);
+  });
+  const routeMapMarkerColors = routeCoordinates.map((_, index) => {
+    const isStart = index === 0;
+    const isEnd = index === routeCoordinates.length - 1;
+    return isStart ? TOKENS[theme].green : isEnd ? TOKENS[theme].red : t.primary;
+  });
+  const routeMapMarkerLabelKey = routeMapMarkerLabels.join('|');
+  const routeMapKey = [
+    routeCoordinates.map((point) => `${point.latitude}:${point.longitude}`).join('|'),
+    routeMapMarkerLabelKey
+  ].join('::');
+  const routeRegion = buildRouteRegion(routeCoordinates, {
+    paddingScale: 1.04,
+    paddingDelta: 0.015,
+    minDelta: 0.008
+  });
   const routeDirectionsUrl = buildGoogleDirectionsUrlFromRoute({
     startLabel: ride.startLocation ?? explicitRouteStartPoint?.label ?? '',
     endLabel: ride.endLocation ?? explicitRouteEndPoint?.label ?? '',
@@ -5650,6 +6103,80 @@ export const RideDetailScreen = ({
     void Linking.openURL(url).catch(() => {
       Alert.alert('Unable to open maps', 'Please try again in a moment.');
     });
+  };
+
+  const handleRouteMapPress = () => {
+    const url = routeDirectionsUrl ?? buildGoogleDirectionsUrl(routeCoordinates);
+    promptOpenRouteInGoogleMaps(url);
+  };
+
+  const fitRouteDetailMapToBounds = () => {
+    if (Platform.OS === 'web') return;
+    if (routeCoordinates.length < 2) return;
+
+    requestAnimationFrame(() => {
+      routeDetailMapRef.current?.fitToCoordinates?.(routeCoordinates, {
+        edgePadding: ROUTE_MAP_EDGE_PADDING,
+        animated: false
+      });
+    });
+  };
+
+  const updateRouteDetailOverlayLabels = (mapSize?: { width: number; height: number }) => {
+    if (!isAndroidMarkerTextOverlayEnabled) {
+      setRouteDetailOverlayLabels([]);
+      return;
+    }
+
+    const resolvedSize = mapSize ?? routeDetailMapSize;
+    if (routeCoordinates.length === 0 || resolvedSize.width <= 0 || resolvedSize.height <= 0) {
+      setRouteDetailOverlayLabels([]);
+      return;
+    }
+
+    const mapRef = routeDetailMapRef.current;
+    if (!mapRef?.pointForCoordinate) return;
+
+    const requestId = routeDetailOverlayRequestRef.current + 1;
+    routeDetailOverlayRequestRef.current = requestId;
+
+    setTimeout(() => {
+      void (async () => {
+        try {
+          const positionedLabels = await Promise.all(
+            routeCoordinates.map(async (coordinate, index) => {
+              const projectedPoint = await mapRef.pointForCoordinate?.(coordinate);
+              if (!projectedPoint) return null;
+
+              const label = routeMapMarkerLabels[index] ?? `Stop ${index + 1}`;
+              const color = routeMapMarkerColors[index] ?? t.primary;
+              const metrics = getRouteMarkerBubbleMetrics(label);
+              const bubbleWidth = metrics.width;
+              const bubbleHeight = 34;
+              const left = Math.max(6, Math.min(resolvedSize.width - bubbleWidth - 6, projectedPoint.x - bubbleWidth / 2));
+              const top = Math.max(6, Math.min(resolvedSize.height - bubbleHeight - 6, projectedPoint.y - 44));
+
+              return {
+                key: `${coordinate.latitude}-${coordinate.longitude}-${index}-${label}`,
+                label,
+                color,
+                width: bubbleWidth,
+                fontSize: metrics.fontSize,
+                left,
+                top
+              };
+            })
+          );
+
+          if (requestId !== routeDetailOverlayRequestRef.current) return;
+          setRouteDetailOverlayLabels(positionedLabels.filter((item): item is NonNullable<typeof item> => item !== null));
+        } catch {
+          if (requestId === routeDetailOverlayRequestRef.current) {
+            setRouteDetailOverlayLabels([]);
+          }
+        }
+      })();
+    }, 210);
   };
 
   const handleShareRide = async () => {
@@ -5849,24 +6376,113 @@ export const RideDetailScreen = ({
 
                 {routeCoordinates.length > 0 ? (
                   routeMapModule ? (
-                    <View style={[styles.routeMapFrame, { borderColor: t.border }]}>
-                      <routeMapModule.MapView style={styles.routeMap} initialRegion={routeRegion}>
+                    <View
+                      style={[styles.routeMapFrame, { borderColor: t.border }]}
+                      onLayout={(event: LayoutChangeEvent) => {
+                        const { width, height } = event.nativeEvent.layout;
+                        const roundedWidth = Math.round(width);
+                        const roundedHeight = Math.round(height);
+                        setRouteDetailOverlayLabels([]);
+                        setRouteDetailMapSize((previous) =>
+                          previous.width === roundedWidth && previous.height === roundedHeight
+                            ? previous
+                            : { width: roundedWidth, height: roundedHeight }
+                        );
+                        updateRouteDetailOverlayLabels({ width: roundedWidth, height: roundedHeight });
+                      }}
+                    >
+                      <routeMapModule.MapView
+                        key={routeMapKey}
+                        ref={Platform.OS === 'web' ? undefined : routeDetailMapRef}
+                        style={styles.routeMap}
+                        initialRegion={routeRegion}
+                        scrollEnabled={false}
+                        zoomEnabled={false}
+                        rotateEnabled={false}
+                        pitchEnabled={false}
+                        toolbarEnabled={false}
+                        onMapReady={() => {
+                          fitRouteDetailMapToBounds();
+                          updateRouteDetailOverlayLabels();
+                        }}
+                        onPress={handleRouteMapPress}
+                        mapPadding={ROUTE_MAP_PADDING}
+                      >
                         <routeMapModule.Polyline coordinates={routeCoordinates} strokeWidth={4} strokeColor={t.primary} />
                         {routeCoordinates.map((point, index) => {
                           const isStart = index === 0;
                           const isEnd = index === routeCoordinates.length - 1;
-                          const markerColor = isStart ? TOKENS[theme].green : isEnd ? TOKENS[theme].red : t.primary;
+                          const labelText = routeMapMarkerLabels[index] ?? `Stop ${index + 1}`;
+                          const markerBubbleMetrics = getRouteMarkerBubbleMetrics(labelText);
+                          const markerColor = routeMapMarkerColors[index] ?? (isStart ? TOKENS[theme].green : isEnd ? TOKENS[theme].red : t.primary);
 
                           return (
                             <routeMapModule.Marker
-                              key={`${point.latitude}-${point.longitude}-${index}`}
+                              key={`${point.latitude}-${point.longitude}-${index}-${labelText}`}
                               coordinate={point}
-                              title={routePoints[index]?.label ?? `Waypoint ${index + 1}`}
-                              pinColor={markerColor}
-                            />
+                              anchor={{ x: 0.5, y: 1 }}
+                              tracksViewChanges={Platform.OS === 'android'}
+                              onPress={handleRouteMapPress}
+                            >
+                              <View collapsable={false} style={{ alignItems: 'center' }}>
+                                {!isAndroidMarkerTextOverlayEnabled && (
+                                  <View style={{ backgroundColor: markerColor, width: markerBubbleMetrics.width, minHeight: 34, paddingHorizontal: 10, justifyContent: 'center', paddingVertical: 7, borderRadius: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3, elevation: 4 }}>
+                                    <Text allowFontScaling={false} style={[styles.metaText, { width: '100%', color: '#fff', fontSize: markerBubbleMetrics.fontSize, lineHeight: markerBubbleMetrics.fontSize + 2, textAlign: 'center' }]}>
+                                      {labelText}
+                                    </Text>
+                                  </View>
+                                )}
+                                {!isAndroidMarkerTextOverlayEnabled && (
+                                  <View style={{ width: 0, height: 0, backgroundColor: 'transparent', borderStyle: 'solid', borderLeftWidth: 6, borderRightWidth: 6, borderTopWidth: 8, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: markerColor }} />
+                                )}
+                                <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: markerColor, borderWidth: 2, borderColor: '#fff' }} />
+                              </View>
+                            </routeMapModule.Marker>
                           );
                         })}
                       </routeMapModule.MapView>
+                      {isAndroidMarkerTextOverlayEnabled && routeDetailOverlayLabels.length > 0 && (
+                        <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
+                          {routeDetailOverlayLabels.map((overlayItem) => (
+                            <View
+                              key={overlayItem.key}
+                              style={{
+                                position: 'absolute',
+                                left: overlayItem.left,
+                                top: overlayItem.top,
+                                backgroundColor: overlayItem.color,
+                                width: overlayItem.width,
+                                minHeight: 34,
+                                paddingHorizontal: 10,
+                                justifyContent: 'center',
+                                paddingVertical: 7,
+                                borderRadius: 8,
+                                shadowColor: '#000',
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.2,
+                                shadowRadius: 3,
+                                elevation: 4
+                              }}
+                            >
+                              <Text
+                                allowFontScaling={false}
+                                style={[
+                                  styles.metaText,
+                                  {
+                                    width: '100%',
+                                    color: '#fff',
+                                    fontSize: overlayItem.fontSize,
+                                    lineHeight: overlayItem.fontSize + 2,
+                                    textAlign: 'center'
+                                  }
+                                ]}
+                              >
+                                {overlayItem.label}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
                     </View>
                   ) : (
                     <View style={[styles.mapUnavailable, { borderColor: t.border, backgroundColor: t.card }]}>
@@ -5885,27 +6501,6 @@ export const RideDetailScreen = ({
                   </View>
                 )}
 
-                {routePoints.length > 0 && (
-                  <View style={styles.routePointList}>
-                    {routePoints.map((point, index) => {
-                      const isStart = index === 0;
-                      const isEnd = index === routePoints.length - 1;
-                      const dotColor = isStart ? TOKENS[theme].green : isEnd ? TOKENS[theme].red : t.primary;
-
-                      return (
-                        <View key={`${point.lat}-${point.lng}-${index}`} style={styles.routePointRow}>
-                          <View style={[styles.routePointDot, { backgroundColor: dotColor }]} />
-                          <View style={styles.flex1}>
-                            <Text style={[styles.boldText, { color: t.text }]}>{point.label ?? `Waypoint ${index + 1}`}</Text>
-                            <Text style={[styles.metaText, { color: t.muted }]}>
-                              {point.lat.toFixed(4)}, {point.lng.toFixed(4)}
-                            </Text>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
               </View>
             )}
           </View>
