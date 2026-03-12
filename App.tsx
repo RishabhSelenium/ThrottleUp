@@ -210,6 +210,11 @@ type AppNotificationPayload = {
   pushTitle?: string;
   pushBody?: string;
 };
+type OpenConversationOptions = {
+  conversationId?: string;
+  participantName?: string;
+  participantAvatar?: string;
+};
 
 const INITIAL_SYNC_STATE: SyncState = {
   rides: { isSyncing: false, error: null, lastSuccessAt: null },
@@ -221,6 +226,49 @@ const INITIAL_SYNC_STATE: SyncState = {
 };
 
 const uniqueStrings = (values: string[]) => Array.from(new Set(values));
+const LEGACY_USER_ALIAS_REGEX = /^user-(\d{10})$/i;
+const INVALID_FIREBASE_KEY_CHARS_REGEX = /[.#$/\[\]]/g;
+const extractPhoneLast10 = (value: string): string => {
+  const normalized = value.trim();
+  if (!normalized) return '';
+  const aliasMatch = normalized.match(LEGACY_USER_ALIAS_REGEX);
+  if (aliasMatch?.[1]) return aliasMatch[1];
+  const digits = normalized.replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : '';
+};
+
+const sanitizeFirebaseKeyPart = (value: string): string => value.trim().replace(INVALID_FIREBASE_KEY_CHARS_REGEX, '_');
+const buildDirectConversationId = (leftUserId: string, rightUserId: string): string => {
+  const left = sanitizeFirebaseKeyPart(leftUserId || 'unknown-a');
+  const right = sanitizeFirebaseKeyPart(rightUserId || 'unknown-b');
+  const [a, b] = [left, right].sort((first, second) => first.localeCompare(second));
+  return `dm-${a}-${b}`;
+};
+
+const resolveConversationUnreadCount = (conversation: { unreadCount?: unknown; isUnread?: unknown }): number => {
+  const unreadCount = typeof conversation.unreadCount === 'number' && Number.isFinite(conversation.unreadCount)
+    ? Math.max(0, Math.floor(conversation.unreadCount))
+    : 0;
+  if (unreadCount > 0) {
+    return unreadCount;
+  }
+  return conversation.isUnread === true ? 1 : 0;
+};
+
+const normalizeConversationSnapshot = (conversation: Conversation): Conversation => ({
+  ...conversation,
+  unreadCount: resolveConversationUnreadCount(conversation)
+});
+const normalizeConversationsSnapshot = (conversations: Conversation[]): Conversation[] =>
+  conversations.map(normalizeConversationSnapshot);
+
+const formatConversationPreviewTimestamp = (value?: string): string => {
+  if (!value) return 'Now';
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return 'Now';
+  return new Date(parsed).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
 const replaceSquadNameMentions = (content: string, previousName: string, nextName: string): string => {
   const from = previousName.trim();
   const to = nextName.trim();
@@ -234,7 +282,7 @@ const replaceSquadNameMentions = (content: string, previousName: string, nextNam
   return updated;
 };
 const RIDE_VISIBILITY_OPTIONS: RideVisibility[] = ['Nearby', 'City', 'Friends'];
-const SQUAD_JOIN_PERMISSION_OPTIONS: SquadJoinPermission[] = ['anyone', 'request_to_join'];
+const SQUAD_JOIN_PERMISSION_OPTIONS: SquadJoinPermission[] = ['anyone', 'request_to_join', 'invite_only'];
 const isRideVisibility = (value: string): value is RideVisibility => RIDE_VISIBILITY_OPTIONS.includes(value as RideVisibility);
 const isSquadJoinPermission = (value: string): value is SquadJoinPermission =>
   SQUAD_JOIN_PERMISSION_OPTIONS.includes(value as SquadJoinPermission);
@@ -1001,7 +1049,7 @@ const AppShell = () => {
     setNotifications(MOCK_NOTIFICATIONS);
     setRides(MOCK_RIDES);
     setHelpPosts(MOCK_HELP);
-    setConversations(MOCK_CONVERSATIONS);
+    setConversations(normalizeConversationsSnapshot(MOCK_CONVERSATIONS));
     setSquads(MOCK_SQUADS);
     setLocationMode('auto');
     setLocationPermissionStatus('undetermined');
@@ -1213,6 +1261,25 @@ const AppShell = () => {
         await operation();
         markSyncSuccess('rides');
       })().catch((error) => markSyncFailure('rides', error));
+    },
+    [ensureFirebaseAuthSession, markSyncFailure, markSyncSuccess, startSync]
+  );
+  const runRideMutationSyncWithResult = useCallback(
+    async (operation: () => Promise<void>): Promise<boolean> => {
+      if (!FIREBASE_ENABLED) return true;
+      startSync('rides');
+      try {
+        const hasAuthSession = await ensureFirebaseAuthSession();
+        if (!hasAuthSession) {
+          throw new Error('Ride sync requires an authenticated Firebase session. Please log in again.');
+        }
+        await operation();
+        markSyncSuccess('rides');
+        return true;
+      } catch (error) {
+        markSyncFailure('rides', error);
+        return false;
+      }
     },
     [ensureFirebaseAuthSession, markSyncFailure, markSyncSuccess, startSync]
   );
@@ -1721,14 +1788,17 @@ const AppShell = () => {
         }
         const completedForAuthenticatedPhone =
           authUser?.phoneNumber ? await isProfileCompletedForPhone(authUser.phoneNumber) : false;
-        const hasAuthenticatedSession = FIREBASE_ENABLED ? Boolean(authUser) : hasPersistedSession;
+        const hasCloudAuthenticatedSession = FIREBASE_ENABLED ? Boolean(authUser) : false;
+        const hasRestorableSession = FIREBASE_ENABLED
+          ? hasCloudAuthenticatedSession || hasPersistedSession
+          : hasPersistedSession;
         const effectiveCurrentUser = authUser
           ? buildAuthenticatedUser(
             authUser.uid,
             authUser.phoneNumber ?? undefined,
             nextCurrentUser.id === authUser.uid ? nextCurrentUser : undefined
           )
-          : hasAuthenticatedSession
+          : hasRestorableSession
             ? nextCurrentUser
             : MOCK_CURRENT_USER;
 
@@ -1743,28 +1813,32 @@ const AppShell = () => {
             }
             : effectiveCurrentUser
         );
-        if (authUser) {
+        if (hasRestorableSession) {
           setIsLoggedIn(true);
         }
-        setUsers(hasAuthenticatedSession ? safeParse<User[]>(savedUsers, MOCK_USERS) : MOCK_USERS);
-        setNotifications(hasAuthenticatedSession ? safeParse<Notification[]>(savedNotifications, MOCK_NOTIFICATIONS) : MOCK_NOTIFICATIONS);
-        setRides(hasAuthenticatedSession ? normalizeRides(safeParse<RidePost[]>(savedRides, MOCK_RIDES)) : MOCK_RIDES);
-        setHelpPosts(hasAuthenticatedSession ? safeParse<HelpPost[]>(savedHelpPosts, MOCK_HELP) : MOCK_HELP);
-        setConversations(hasAuthenticatedSession ? safeParse<Conversation[]>(savedConversations, MOCK_CONVERSATIONS) : MOCK_CONVERSATIONS);
-        setSquadChatMessagesByRoom(hasAuthenticatedSession ? safeParse<Record<string, ChatMessage[]>>(savedSquadChats, {}) : {});
+        setUsers(hasRestorableSession ? safeParse<User[]>(savedUsers, MOCK_USERS) : MOCK_USERS);
+        setNotifications(hasRestorableSession ? safeParse<Notification[]>(savedNotifications, MOCK_NOTIFICATIONS) : MOCK_NOTIFICATIONS);
+        setRides(hasRestorableSession ? normalizeRides(safeParse<RidePost[]>(savedRides, MOCK_RIDES)) : MOCK_RIDES);
+        setHelpPosts(hasRestorableSession ? safeParse<HelpPost[]>(savedHelpPosts, MOCK_HELP) : MOCK_HELP);
+        setConversations(
+          hasRestorableSession
+            ? normalizeConversationsSnapshot(safeParse<Conversation[]>(savedConversations, MOCK_CONVERSATIONS))
+            : normalizeConversationsSnapshot(MOCK_CONVERSATIONS)
+        );
+        setSquadChatMessagesByRoom(hasRestorableSession ? safeParse<Record<string, ChatMessage[]>>(savedSquadChats, {}) : {});
         setNewsArticles(safeParse<NewsArticle[]>(savedNews, MOCK_NEWS));
         setSquads(
-          hasAuthenticatedSession
+          hasRestorableSession
             ? normalizeSquads(safeParse<LegacySquad[]>(savedSquads, MOCK_SQUADS))
             : normalizeSquads(MOCK_SQUADS)
         );
-        setLocationMode(hasAuthenticatedSession ? safeParse<LocationMode>(savedLocationMode, 'auto') : 'auto');
+        setLocationMode(hasRestorableSession ? safeParse<LocationMode>(savedLocationMode, 'auto') : 'auto');
 
-        if (FIREBASE_ENABLED && !hasAuthenticatedSession) {
+        if (FIREBASE_ENABLED && !hasRestorableSession) {
           void clearPersistedSessionStorage();
         }
 
-        if (FIREBASE_ENABLED && hasAuthenticatedSession) {
+        if (FIREBASE_ENABLED && hasCloudAuthenticatedSession) {
           startSync('rides');
           startSync('help');
 
@@ -1842,6 +1916,10 @@ const AppShell = () => {
     const unsubscribe = subscribeToAuthState((user) => {
       if (!hydrated) return;
       if (!user) {
+        const hasLocalSession = isLoggedIn && currentUser.id !== MOCK_CURRENT_USER.id;
+        if (hasLocalSession) {
+          return;
+        }
         clearSession();
         return;
       }
@@ -1852,7 +1930,7 @@ const AppShell = () => {
       });
     });
     return unsubscribe;
-  }, [applyAuthenticatedSession, clearSession, hydrated, isLoggedIn]);
+  }, [applyAuthenticatedSession, clearSession, currentUser.id, hydrated, isLoggedIn]);
 
   useEffect(() => {
     if (!FIREBASE_ENABLED || !hydrated || !isLoggedIn) return;
@@ -2149,9 +2227,31 @@ const AppShell = () => {
     [canCurrentUserCreateSquadRide, squads]
   );
 
-  const blockedUserIds = useMemo(() => new Set(currentUser.blockedUserIds), [currentUser.blockedUserIds]);
-  const visibleUsers = useMemo(() => users.filter((user) => !blockedUserIds.has(user.id)), [users, blockedUserIds]);
   const allUsers = useMemo(() => Array.from(usersById.values()), [usersById]);
+  const blockedUserIds = useMemo(() => {
+    const blocked = new Set(uniqueStrings(currentUser.blockedUserIds.filter(Boolean)));
+    const blockedPhoneLast10 = new Set<string>();
+
+    currentUser.blockedUserIds.forEach((blockedId) => {
+      const fromId = extractPhoneLast10(blockedId);
+      if (fromId) blockedPhoneLast10.add(fromId);
+
+      const blockedUser = usersById.get(blockedId);
+      const fromPhone = extractPhoneLast10(blockedUser?.phoneNumber ?? '');
+      if (fromPhone) blockedPhoneLast10.add(fromPhone);
+    });
+
+    if (blockedPhoneLast10.size === 0) return blocked;
+
+    allUsers.forEach((user) => {
+      const phoneLast10 = extractPhoneLast10(user.phoneNumber ?? '');
+      if (!phoneLast10 || !blockedPhoneLast10.has(phoneLast10)) return;
+      blocked.add(user.id);
+    });
+
+    return blocked;
+  }, [allUsers, currentUser.blockedUserIds, usersById]);
+  const visibleUsers = useMemo(() => users.filter((user) => !blockedUserIds.has(user.id)), [users, blockedUserIds]);
   const visibleNotifications = useMemo(
     () => notifications.filter((notification) => !blockedUserIds.has(notification.senderId)),
     [notifications, blockedUserIds]
@@ -2299,8 +2399,9 @@ const AppShell = () => {
       const exact = usersById.get(userId);
       if (exact && !exact.isInferredProfile) return exact;
 
-      const digitsFromId = userId.replace(/\D/g, '');
-      const aliasPhoneLast10 = digitsFromId.length >= 10 ? digitsFromId.slice(-10) : '';
+      const aliasMatch = userId.match(LEGACY_USER_ALIAS_REGEX);
+      const e164Digits = userId.trim().startsWith('+') ? userId.replace(/\D/g, '') : '';
+      const aliasPhoneLast10 = aliasMatch?.[1] ?? (e164Digits.length >= 10 ? e164Digits.slice(-10) : '');
       if (!aliasPhoneLast10) {
         return exact ?? null;
       }
@@ -2445,6 +2546,18 @@ const AppShell = () => {
     setIsHelpDetailOpen(false);
     setSelectedHelpPost(null);
   }, [selectedHelpPost, blockedUserIds, setIsHelpDetailOpen, setSelectedHelpPost]);
+
+  useEffect(() => {
+    if (!selectedHelpPost) return;
+    const latestPost = helpPostsById.get(selectedHelpPost.id);
+    if (!latestPost) {
+      setIsHelpDetailOpen(false);
+      setSelectedHelpPost(null);
+      return;
+    }
+    if (latestPost === selectedHelpPost) return;
+    setSelectedHelpPost(latestPost);
+  }, [helpPostsById, selectedHelpPost, setIsHelpDetailOpen, setSelectedHelpPost]);
 
   useEffect(() => {
     if (!activeSquadChatId) return;
@@ -3616,67 +3729,199 @@ const AppShell = () => {
     ]);
   };
 
-  const openOrCreateConversation = (userId: string) => {
-    if (userId === currentUser.id) return;
-    if (blockedUserIds.has(userId)) {
-      pushSystemNotification('This rider is blocked. Unblock them to start a chat.');
-      setIsNotificationsOpen(true);
-      return;
-    }
+  const openOrCreateConversation = useCallback(
+    (userId: string, options?: OpenConversationOptions) => {
+      if (userId === currentUser.id) return;
 
-    const participant = usersById.get(userId) ?? buildInferredUserRecord(userId);
-    if (!participant) {
-      showActionGuardrail('Profile details are still syncing. Please try again in a moment.');
-      return;
-    }
+      const canonicalUser = resolveCanonicalUser(userId);
+      const participant = canonicalUser ?? usersById.get(userId) ?? buildInferredUserRecord(userId);
+      const participantId = participant?.id ?? userId;
+      const participantName = participant?.name || options?.participantName?.trim() || 'Rider';
+      const participantAvatar = participant?.avatar || options?.participantAvatar || avatarFallback;
 
-    setConversations((prev) => {
-      const existingConversation = prev.find((conv) => conv.participantId === userId);
-
-      if (existingConversation) {
-        const openedConversation = { ...existingConversation, unreadCount: 0 };
-        setActiveConversation(openedConversation);
-        return prev.map((conv) => (conv.id === openedConversation.id ? openedConversation : conv));
+      if (blockedUserIds.has(userId) || blockedUserIds.has(participantId)) {
+        pushSystemNotification('This rider is blocked. Unblock them to start a chat.');
+        setIsNotificationsOpen(true);
+        return;
       }
 
-      const newConversation: Conversation = {
-        id: `conv-${Date.now()}`,
-        participantId: participant.id,
-        participantName: participant.name,
-        participantAvatar: participant.avatar,
-        lastMessage: 'You are now connected! Say hi.',
-        timestamp: 'Just now',
-        unreadCount: 0,
-        messages: []
-      };
+      const preferredConversationId = options?.conversationId?.trim() || '';
+      setConversations((prev) => {
+        const normalizedPrev = normalizeConversationsSnapshot(prev);
 
-      setActiveConversation(newConversation);
-      return [newConversation, ...prev];
-    });
+        const existingByIdIndex = preferredConversationId
+          ? normalizedPrev.findIndex((conversation) => conversation.id === preferredConversationId)
+          : -1;
+        const existingByParticipantIndex = normalizedPrev.findIndex((conversation) => {
+          const canonicalParticipantId = resolveCanonicalUser(conversation.participantId)?.id ?? conversation.participantId;
+          return canonicalParticipantId === participantId || conversation.participantId === userId || conversation.participantId === participantId;
+        });
+        const existingIndex = existingByIdIndex >= 0 ? existingByIdIndex : existingByParticipantIndex;
+        const targetConversationId = preferredConversationId
+          || (existingIndex >= 0 ? normalizedPrev[existingIndex].id : buildDirectConversationId(currentUser.id, participantId));
 
-    setSelectedUserId(null);
-    setActiveTab('chats');
-  };
+        if (existingIndex >= 0) {
+          const existingConversation = normalizedPrev[existingIndex];
+          const openedConversation: Conversation = {
+            ...existingConversation,
+            id: targetConversationId,
+            participantId,
+            participantName,
+            participantAvatar,
+            unreadCount: 0
+          };
+          setActiveConversation(openedConversation);
+
+          const remaining = normalizedPrev.filter((_, index) => index !== existingIndex).filter((conversation) => {
+            const canonicalParticipantId = resolveCanonicalUser(conversation.participantId)?.id ?? conversation.participantId;
+            return canonicalParticipantId !== participantId;
+          });
+          return [openedConversation, ...remaining];
+        }
+
+        const newConversation: Conversation = {
+          id: targetConversationId,
+          participantId,
+          participantName,
+          participantAvatar,
+          lastMessage: 'You are now connected! Say hi.',
+          timestamp: 'Now',
+          unreadCount: 0,
+          messages: []
+        };
+
+        setActiveConversation(newConversation);
+        return [newConversation, ...normalizedPrev];
+      });
+
+      setSelectedUserId(null);
+      setActiveTab('chats');
+    },
+    [
+      blockedUserIds,
+      buildInferredUserRecord,
+      currentUser.id,
+      pushSystemNotification,
+      resolveCanonicalUser,
+      setActiveTab,
+      setIsNotificationsOpen,
+      setSelectedUserId,
+      usersById
+    ]
+  );
+
+  const upsertConversationFromChatNotification = useCallback(
+    (incoming: Notification) => {
+      const payload = incoming.data ?? {};
+      const target = typeof payload.target === 'string' ? payload.target.trim().toLowerCase() : '';
+      const type = typeof payload.type === 'string' ? payload.type.trim().toLowerCase() : '';
+      const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId.trim() : '';
+      const senderIdCandidates = [payload.senderId, payload.userId, payload.requesterId]
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter(Boolean);
+      const senderId = senderIdCandidates[0] ?? '';
+      const isDirectChatNotification =
+        target === 'chat' || target === 'conversation' || type === 'chat_message' || Boolean(conversationId);
+
+      if (!isDirectChatNotification || !senderId) return;
+      if (senderId === currentUser.id) return;
+
+      const sender = resolveCanonicalUser(senderId) ?? usersById.get(senderId) ?? buildInferredUserRecord(senderId);
+      const senderIdResolved = sender?.id ?? senderId;
+      const senderName = sender?.name || incoming.senderName?.trim() || 'Rider';
+      const senderAvatar = sender?.avatar || incoming.senderAvatar || avatarFallback;
+      if (blockedUserIds.has(senderId) || blockedUserIds.has(senderIdResolved)) return;
+
+      const messagePreview = incoming.content.trim();
+      const targetConversationId = conversationId || buildDirectConversationId(currentUser.id, senderIdResolved);
+      const activeParticipantId = activeConversation
+        ? (resolveCanonicalUser(activeConversation.participantId)?.id ?? activeConversation.participantId)
+        : null;
+      const isActiveThread = activeConversation?.id === targetConversationId || activeParticipantId === senderIdResolved;
+
+      setConversations((prev) => {
+        const normalizedPrev = normalizeConversationsSnapshot(prev);
+        const existingByIdIndex = normalizedPrev.findIndex((conversation) => conversation.id === targetConversationId);
+        const existingByParticipantIndex = normalizedPrev.findIndex((conversation) => {
+          const canonicalParticipantId = resolveCanonicalUser(conversation.participantId)?.id ?? conversation.participantId;
+          return canonicalParticipantId === senderIdResolved;
+        });
+        const existingIndex = existingByIdIndex >= 0 ? existingByIdIndex : existingByParticipantIndex;
+        const nextUnreadCount = isActiveThread ? 0 : 1;
+
+        if (existingIndex >= 0) {
+          const existingConversation = normalizedPrev[existingIndex];
+          const updatedConversation: Conversation = {
+            ...existingConversation,
+            id: targetConversationId,
+            participantId: senderIdResolved,
+            participantName: senderName,
+            participantAvatar: senderAvatar,
+            lastMessage: messagePreview || existingConversation.lastMessage,
+            timestamp: formatConversationPreviewTimestamp(incoming.timestamp),
+            unreadCount: isActiveThread
+              ? 0
+              : resolveConversationUnreadCount(existingConversation) + 1
+          };
+
+          const remaining = normalizedPrev.filter((_, index) => index !== existingIndex).filter((conversation) => {
+            const canonicalParticipantId = resolveCanonicalUser(conversation.participantId)?.id ?? conversation.participantId;
+            return canonicalParticipantId !== senderIdResolved;
+          });
+          return [updatedConversation, ...remaining];
+        }
+
+        const newConversation: Conversation = {
+          id: targetConversationId,
+          participantId: senderIdResolved,
+          participantName: senderName,
+          participantAvatar: senderAvatar,
+          lastMessage: messagePreview || 'New message',
+          timestamp: formatConversationPreviewTimestamp(incoming.timestamp),
+          unreadCount: nextUnreadCount,
+          messages: []
+        };
+
+        return [newConversation, ...normalizedPrev];
+      });
+    },
+    [
+      activeConversation,
+      blockedUserIds,
+      buildInferredUserRecord,
+      currentUser.id,
+      resolveCanonicalUser,
+      usersById
+    ]
+  );
 
   const handleNotificationNavigation = useCallback(
     (data?: Record<string, unknown>) => {
       const payload = data ?? {};
-      const target = typeof payload.target === 'string' ? payload.target.trim() : '';
+      const target = typeof payload.target === 'string' ? payload.target.trim().toLowerCase() : '';
+      const type = typeof payload.type === 'string' ? payload.type.trim().toLowerCase() : '';
       const rideId = typeof payload.rideId === 'string' ? payload.rideId.trim() : '';
       const helpPostId = typeof payload.helpPostId === 'string' ? payload.helpPostId.trim() : '';
+      const conversationId = typeof payload.conversationId === 'string' ? payload.conversationId.trim() : '';
       const squadId = typeof payload.squadId === 'string' ? payload.squadId.trim() : '';
+      const senderName = typeof payload.senderName === 'string' ? payload.senderName.trim() : '';
+      const senderAvatar = typeof payload.senderAvatar === 'string' ? payload.senderAvatar.trim() : '';
       const userIdCandidates = [payload.userId, payload.senderId, payload.requesterId]
         .map((value) => (typeof value === 'string' ? value.trim() : ''))
         .filter(Boolean);
       const userId = userIdCandidates[0] ?? '';
 
-      if ((target === 'chat' || target === 'conversation') && userId) {
+      if ((target === 'chat' || target === 'conversation' || type === 'chat_message' || Boolean(conversationId)) && userId) {
         if (blockedUserIds.has(userId)) {
           pushSystemNotification('This rider is blocked.');
           setIsNotificationsOpen(true);
           return;
         }
-        openOrCreateConversation(userId);
+        openOrCreateConversation(userId, {
+          conversationId,
+          participantName: senderName || undefined,
+          participantAvatar: senderAvatar || undefined
+        });
         return;
       }
 
@@ -3722,7 +3967,7 @@ const AppShell = () => {
           return;
         }
         setActiveTab('squad');
-        if (target === 'squad_chat') {
+        if (target === 'squad_chat' || type === 'squad_chat_message') {
           setSelectedSquadId(null);
           setActiveSquadChatId(squadId);
           return;
@@ -3760,7 +4005,14 @@ const AppShell = () => {
 
     const handleIncomingNotification = (incoming: Awaited<ReturnType<typeof buildStoredNotificationFromExpo>>) => {
       if (!incoming) return;
-      setNotifications((prev) => mergeNotification(prev, incoming));
+      let isNewNotification = false;
+      setNotifications((prev) => {
+        isNewNotification = !prev.some((notification) => notification.id === incoming.id);
+        return mergeNotification(prev, incoming);
+      });
+      if (isNewNotification) {
+        upsertConversationFromChatNotification(incoming);
+      }
     };
 
     const handleNotificationResponse = (
@@ -3816,7 +4068,7 @@ const AppShell = () => {
       active = false;
       cleanup();
     };
-  }, [handleNotificationNavigation, hydrated, isExpoGo, isLoggedIn, setNotifications]);
+  }, [handleNotificationNavigation, hydrated, isExpoGo, isLoggedIn, setNotifications, upsertConversationFromChatNotification]);
 
   const handleViewProfile = (userId: string) => {
     const canonicalUser = resolveCanonicalUser(userId);
@@ -3873,16 +4125,17 @@ const AppShell = () => {
     if (selectedRideTrackingSession?.rideId === rideId) {
       setSelectedRideTrackingSession(null);
     }
-    if (FIREBASE_ENABLED) {
-      runRideMutationSync(() => deleteRideInFirestore(rideId));
-    }
-    void triggerRideCancelledNotification(
-      rideId,
-      rideToCancel.title,
-      currentUser.id,
-      currentUser.name,
-      rideToCancel.currentParticipants
-    ).catch(() => undefined);
+    void (async () => {
+      const syncSucceeded = await runRideMutationSyncWithResult(() => deleteRideInFirestore(rideId));
+      if (!syncSucceeded) return;
+      void triggerRideCancelledNotification(
+        rideId,
+        rideToCancel.title,
+        currentUser.id,
+        currentUser.name,
+        rideToCancel.currentParticipants
+      ).catch(() => undefined);
+    })();
     setIsRideDetailOpen(false);
     setSelectedRideId(null);
   };
@@ -4298,16 +4551,6 @@ const AppShell = () => {
         return updatedRide;
       });
 
-      if (rideJoinStateToSync && FIREBASE_ENABLED) {
-        const rideToSync = rideJoinStateToSync;
-        runRideMutationSync(() =>
-          updateRideJoinStateInFirestore(rideToSync.rideId, {
-            currentParticipants: rideToSync.currentParticipants,
-            requests: rideToSync.requests
-          })
-        );
-      }
-
       if (analyticsJoinMode) {
         void logAnalyticsEvent('join_ride', {
           ride_id: rideId,
@@ -4327,7 +4570,16 @@ const AppShell = () => {
     }
 
     const fanoutPayload = requestFanoutPayload as { rideId: string; rideTitle: string; creatorId: string } | null;
-    if (fanoutPayload) {
+    const rideStateToSync = rideJoinStateToSync as { rideId: string; currentParticipants: string[]; requests: string[] } | null;
+    void (async () => {
+      if (!rideStateToSync) return;
+      const syncSucceeded = await runRideMutationSyncWithResult(() =>
+        updateRideJoinStateInFirestore(rideStateToSync.rideId, {
+          currentParticipants: rideStateToSync.currentParticipants,
+          requests: rideStateToSync.requests
+        })
+      );
+      if (!syncSucceeded || !fanoutPayload) return;
       void triggerRideRequestOwnerNotification({
         rideId: fanoutPayload.rideId,
         rideTitle: fanoutPayload.rideTitle,
@@ -4335,7 +4587,7 @@ const AppShell = () => {
         requesterName: currentUser.name,
         ownerId: fanoutPayload.creatorId
       }).catch(() => undefined);
-    }
+    })();
   };
 
   useEffect(() => {
@@ -4651,10 +4903,11 @@ const AppShell = () => {
       ride_id: newRide.id,
       visibility: newRide.visibility.join('|')
     });
-    if (FIREBASE_ENABLED) {
-      runRideMutationSync(() => upsertRideInFirestore(newRide));
-    }
-    void triggerRideCreatedNotification(newRide).catch(() => undefined);
+    void (async () => {
+      const syncSucceeded = await runRideMutationSyncWithResult(() => upsertRideInFirestore(newRide));
+      if (!syncSucceeded) return;
+      void triggerRideCreatedNotification(newRide).catch(() => undefined);
+    })();
     setCreatedRide(newRide);
     setIsCreateRideModalOpen(false);
     setIsCreateMenuOpen(false);
@@ -5056,11 +5309,16 @@ const AppShell = () => {
   };
 
   const handleJoinSquad = (squadId: string) => {
+    let shouldShowInviteOnlyAlert = false;
     setSquads((prev) => {
       let updatedSquad: Squad | null = null;
       const next = prev.map((s) => {
         if (s.id !== squadId) return s;
         if (s.members.includes(currentUser.id)) return s;
+        if (s.joinPermission === 'invite_only') {
+          shouldShowInviteOnlyAlert = true;
+          return s;
+        }
         if (s.joinPermission === 'request_to_join') {
           if (s.joinRequests.includes(currentUser.id)) return s;
           updatedSquad = { ...s, joinRequests: [...s.joinRequests, currentUser.id] };
@@ -5083,6 +5341,10 @@ const AppShell = () => {
 
       return next;
     });
+
+    if (shouldShowInviteOnlyAlert) {
+      showActionGuardrail('This squad is invite only.');
+    }
   };
 
   const handleLeaveSquad = (squadId: string) => {
@@ -5631,7 +5893,10 @@ const AppShell = () => {
 
   const handleSendMessage = (conversationId: string, text: string) => {
     const targetConversation = conversations.find((conversation) => conversation.id === conversationId);
-    if (targetConversation && blockedUserIds.has(targetConversation.participantId)) return;
+    const canonicalRecipientId = targetConversation?.participantId
+      ? (resolveCanonicalUser(targetConversation.participantId)?.id ?? targetConversation.participantId)
+      : undefined;
+    if (targetConversation && (blockedUserIds.has(targetConversation.participantId) || blockedUserIds.has(canonicalRecipientId ?? ''))) return;
 
     const normalizedText = text.trim();
     if (!normalizedText) return;
@@ -5673,7 +5938,7 @@ const AppShell = () => {
     const newMsg: ChatMessage = {
       id: `m-${Date.now()}`,
       senderId: currentUser.id,
-      recipientId: targetConversation?.participantId,
+      recipientId: canonicalRecipientId,
       text: normalizedText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
@@ -5706,12 +5971,12 @@ const AppShell = () => {
         }
         await sendChatMessageToRealtime(conversationId, newMsg);
         markSyncSuccess('chat');
-        if (targetConversation?.participantId) {
+        if (canonicalRecipientId) {
           void triggerDirectChatMessageNotification({
             conversationId,
             senderId: currentUser.id,
             senderName: currentUser.name,
-            recipientId: targetConversation.participantId,
+            recipientId: canonicalRecipientId,
             text: normalizedText
           }).catch((error) => {
             console.warn('[notifications] Failed to dispatch direct chat push event:', error);
@@ -5729,10 +5994,7 @@ const AppShell = () => {
   };
 
   const handleOpenChatRoom = (conversation: Conversation) => {
-    const openedConversation = { ...conversation, unreadCount: 0 };
-    setActiveConversation(openedConversation);
-    setConversations((prev) => prev.map((conv) => (conv.id === openedConversation.id ? openedConversation : conv)));
-    setActiveTab('chats');
+    openOrCreateConversation(conversation.participantId, { conversationId: conversation.id });
   };
 
   const handleSendSquadMessage = (squadId: string, text: string) => {
@@ -6362,6 +6624,8 @@ const AppShell = () => {
                     uid: payload.uid,
                     phoneNumber: normalizedPhone
                   });
+                } else if (FIREBASE_ENABLED) {
+                  throw new Error('Phone verification did not create a Firebase session. Please request a new OTP and try again.');
                 } else {
                   setCurrentUser((prev) => {
                     const updated = { ...prev, phoneNumber: normalizedPhone || prev.phoneNumber };

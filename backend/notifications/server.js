@@ -502,8 +502,10 @@ app.post('/notifications/chat-message', ensureAuthorized, async (req, res) => {
       body: truncate(text, 120),
       data: {
         type: 'chat_message',
+        target: 'conversation',
         conversationId,
-        senderId
+        senderId,
+        userId: senderId
       },
       soundName: 'msg_notification'
     });
@@ -546,6 +548,7 @@ app.post('/notifications/squad-chat-message', ensureAuthorized, async (req, res)
       body: truncate(text, 120),
       data: {
         type: 'squad_chat_message',
+        target: 'squad_chat',
         squadId,
         senderId
       },

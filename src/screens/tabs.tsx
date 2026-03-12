@@ -1,7 +1,7 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerAndroid, DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { StatusBar as ExpoStatusBar } from 'expo-status-bar';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -23,6 +23,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { styles } from '../app/styles';
 import { TOKENS, Theme, avatarFallback, formatClock, formatRelative } from '../app/ui';
 import { Badge, RideCard } from '../components/common';
+import { isNativePhoneAuthAvailable, requestPhoneOtp, verifyPhoneOtp } from '../firebase/auth';
 
 import { Conversation, HelpPost, NewsArticle, RidePost, Squad, User } from '../types';
 
@@ -139,6 +140,7 @@ export const LoginScreen = ({
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [otp, setOtp] = useState('');
+  const [verificationId, setVerificationId] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const phoneInputRef = useRef<TextInput>(null);
@@ -146,9 +148,9 @@ export const LoginScreen = ({
 
   const e164Phone = phoneNumber.length === 10 ? `+91${phoneNumber}` : '';
   const maskedPhone = phoneNumber.length >= 4 ? `+91******${phoneNumber.slice(-4)}` : '+91******0000';
-  const otpLength = betaModeEnabled ? Math.max(4, betaDefaultOtp.length) : 4;
-  const expectedOtp = phoneNumber.slice(-4);
+  const otpLength = betaModeEnabled ? Math.max(4, betaDefaultOtp.length) : firebaseEnabled ? 6 : 4;
   const isNumberAllowedForBeta = betaAllowedPhones.length === 0 || betaAllowedPhones.includes(e164Phone);
+  const nativePhoneAuthAvailable = betaModeEnabled || !firebaseEnabled || isNativePhoneAuthAvailable();
 
   const readError = (value: unknown) => {
     const rawMessage = value instanceof Error ? value.message : 'Unable to continue right now.';
@@ -173,7 +175,8 @@ export const LoginScreen = ({
     return rawMessage;
   };
 
-  const handleGetOtp = () => {
+  const handleGetOtp = async () => {
+    if (isSubmitting) return;
     if (phoneNumber.length < 10) {
       setError('Enter a valid 10-digit phone number.');
       return;
@@ -185,22 +188,33 @@ export const LoginScreen = ({
     }
 
     setError('');
-    setStep('otp');
+    if (betaModeEnabled || !firebaseEnabled) {
+      setVerificationId('');
+      setStep('otp');
+      return;
+    }
+
+    if (!nativePhoneAuthAvailable) {
+      setError('Phone auth is unavailable in this build. Rebuild the app with native Firebase phone auth enabled.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const nextVerificationId = await requestPhoneOtp(e164Phone);
+      setVerificationId(nextVerificationId);
+      setOtp('');
+      setStep('otp');
+    } catch (requestError) {
+      setError(readError(requestError));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleVerify = async () => {
     if (otp.length < otpLength) {
-      setError(`Enter the ${otpLength}-digit PIN.`);
-      return;
-    }
-
-    if (betaModeEnabled) {
-      if (otp !== betaDefaultOtp) {
-        setError('Incorrect beta OTP. Please use the OTP shared for this beta.');
-        return;
-      }
-    } else if (otp !== expectedOtp) {
-      setError('Incorrect PIN. Enter the last 4 digits of your phone number.');
+      setError(betaModeEnabled || !firebaseEnabled ? `Enter the ${otpLength}-digit PIN.` : 'Enter the 6-digit verification code.');
       return;
     }
 
@@ -209,10 +223,27 @@ export const LoginScreen = ({
 
     try {
       if (betaModeEnabled) {
+        if (otp !== betaDefaultOtp) {
+          setError('Incorrect beta OTP. Please use the OTP shared for this beta.');
+          return;
+        }
+        await onLogin({ phoneNumber: e164Phone });
+      } else if (!firebaseEnabled) {
+        const expectedOtp = phoneNumber.slice(-4);
+        if (otp !== expectedOtp) {
+          setError('Incorrect PIN. Enter the last 4 digits of your phone number.');
+          return;
+        }
         await onLogin({ phoneNumber: e164Phone });
       } else {
-        const uid = `user-${phoneNumber}`;
-        await onLogin({ uid, phoneNumber: e164Phone });
+        if (!verificationId) {
+          throw new Error('Please request OTP again.');
+        }
+        const verifiedUser = await verifyPhoneOtp(verificationId, otp);
+        await onLogin({
+          uid: verifiedUser.uid,
+          phoneNumber: verifiedUser.phoneNumber ?? e164Phone
+        });
       }
     } catch (verifyError) {
       setError(readError(verifyError));
@@ -223,6 +254,7 @@ export const LoginScreen = ({
 
   const handleChangeNumber = () => {
     setOtp('');
+    setVerificationId('');
     setError('');
     setStep('phone');
     setTimeout(() => phoneInputRef.current?.focus(), 0);
@@ -254,15 +286,26 @@ export const LoginScreen = ({
               </View>
             </View>
 
-            <Text style={[styles.loginTitle, { color: t.text }]}>{step === 'phone' ? 'Ride Connected' : 'Enter Your PIN'}</Text>
+            <Text style={[styles.loginTitle, { color: t.text }]}>
+              {step === 'phone' ? 'Ride Connected' : betaModeEnabled || !firebaseEnabled ? 'Enter Your PIN' : 'Enter Verification Code'}
+            </Text>
             {step !== 'phone' && (
               <Text style={[styles.loginSubtitle, { color: t.muted }]}>
-                {betaModeEnabled ? `Enter the beta OTP for ${maskedPhone}` : `Enter the last 4 digits of ${maskedPhone}`}
+                {betaModeEnabled
+                  ? `Enter the beta OTP for ${maskedPhone}`
+                  : firebaseEnabled
+                    ? `Enter the verification code sent to ${maskedPhone}`
+                    : `Enter the last 4 digits of ${maskedPhone}`}
               </Text>
             )}
             {!firebaseEnabled && (
               <Text style={[styles.errorText, { color: TOKENS[theme].red }]}>
                 Cloud sync is disabled in this build. Data will stay on this device only.
+              </Text>
+            )}
+            {!betaModeEnabled && firebaseEnabled && !nativePhoneAuthAvailable && (
+              <Text style={[styles.errorText, { color: TOKENS[theme].red }]}>
+                Native Firebase phone auth is unavailable in this build. Rebuild the app to enable OTP login.
               </Text>
             )}
 
@@ -288,11 +331,18 @@ export const LoginScreen = ({
                   </Text>
                 )}
                 <TouchableOpacity
-                  style={[styles.primaryButton, { backgroundColor: t.primary }]}
-                  onPress={handleGetOtp}
+                  style={[styles.primaryButton, { backgroundColor: t.primary, opacity: isSubmitting ? 0.7 : 1 }]}
+                  onPress={() => {
+                    void handleGetOtp();
+                  }}
+                  disabled={isSubmitting}
                 >
-                  <MaterialCommunityIcons name="lock-outline" size={18} color="#fff" />
-                  <Text style={styles.primaryButtonText}>Continue</Text>
+                  {isSubmitting ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <MaterialCommunityIcons name="lock-outline" size={18} color="#fff" />
+                  )}
+                  <Text style={styles.primaryButtonText}>{firebaseEnabled && !betaModeEnabled ? 'Send OTP' : 'Continue'}</Text>
                 </TouchableOpacity>
               </View>
             ) : (
@@ -302,7 +352,13 @@ export const LoginScreen = ({
                   keyboardType="number-pad"
                   maxLength={otpLength}
                   value={otp}
-                  placeholder={betaModeEnabled ? 'Enter shared beta OTP' : 'Last 4 digits of your number'}
+                  placeholder={
+                    betaModeEnabled
+                      ? 'Enter shared beta OTP'
+                      : firebaseEnabled
+                        ? 'Enter SMS verification code'
+                        : 'Last 4 digits of your number'
+                  }
                   placeholderTextColor={t.muted}
                   onChangeText={(value) => {
                     setOtp(value.replace(/\D/g, '').slice(0, otpLength));
@@ -322,7 +378,7 @@ export const LoginScreen = ({
                   ) : (
                     <MaterialCommunityIcons name="fingerprint" size={18} color="#fff" />
                   )}
-                  <Text style={styles.primaryButtonText}>Verify & Enter</Text>
+                  <Text style={styles.primaryButtonText}>{firebaseEnabled && !betaModeEnabled ? 'Verify OTP & Enter' : 'Verify & Enter'}</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity onPress={handleChangeNumber}>
@@ -780,6 +836,13 @@ export const ChatsTab = ({
   }, [currentUser.friends, users]);
 
   const mySquads = useMemo(() => squads.filter((sq) => sq.members.includes(currentUser.id)), [squads, currentUser.id]);
+  const getUnreadCount = useCallback((conversation: Conversation): number => {
+    const unread = typeof conversation.unreadCount === 'number' && Number.isFinite(conversation.unreadCount)
+      ? Math.max(0, Math.floor(conversation.unreadCount))
+      : 0;
+    if (unread > 0) return unread;
+    return conversation.isUnread ? 1 : 0;
+  }, []);
 
   const filteredConversations = useMemo(() => {
     let result = conversations;
@@ -795,11 +858,11 @@ export const ChatsTab = ({
 
     // Apply pills
     if (activeFilter === 'unread') {
-      result = result.filter(c => c.unreadCount > 0);
+      result = result.filter((conversation) => getUnreadCount(conversation) > 0);
     }
     
     return result;
-  }, [conversations, activeFilter, searchQuery]);
+  }, [conversations, activeFilter, getUnreadCount, searchQuery]);
 
   const filteredSquads = useMemo(() => {
     let result = mySquads;
@@ -876,7 +939,9 @@ export const ChatsTab = ({
             <Text style={[styles.emptySubtitle, { color: t.muted }]}>Connect with riders to start messaging.</Text>
           </View>
         ) : (
-          filteredConversations.map((chat) => (
+          filteredConversations.map((chat) => {
+            const unreadCount = getUnreadCount(chat);
+            return (
             <TouchableOpacity
               key={chat.id}
               style={styles.chatRow}
@@ -892,21 +957,22 @@ export const ChatsTab = ({
                   <Text style={[styles.chatParticipantName, { color: t.text }]} numberOfLines={1}>
                     {chat.participantName}
                   </Text>
-                  <Text style={[styles.chatTimestamp, { color: chat.unreadCount > 0 ? t.primary : t.muted }]}>{chat.timestamp}</Text>
+                  <Text style={[styles.chatTimestamp, { color: unreadCount > 0 ? t.primary : t.muted }]}>{chat.timestamp}</Text>
                 </View>
                 <View style={styles.rowBetween}>
                   <Text style={[styles.chatPreviewText, { color: t.muted, flex: 1, paddingRight: 10 }]} numberOfLines={1}>
                     {chat.lastMessage}
                   </Text>
-                  {chat.unreadCount > 0 && (
+                  {unreadCount > 0 && (
                      <View style={[styles.chatUnreadBadge, { backgroundColor: t.primary }]}>
-                        <Text style={styles.chatUnreadBadgeText}>{chat.unreadCount}</Text>
+                        <Text style={styles.chatUnreadBadgeText}>{unreadCount}</Text>
                      </View>
                   )}
                 </View>
               </View>
             </TouchableOpacity>
-          ))
+            );
+          })
         )
       ) : activeFilter === 'squads' ? (
         filteredSquads.length === 0 ? (

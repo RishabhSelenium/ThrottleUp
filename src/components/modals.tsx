@@ -5851,6 +5851,66 @@ export const RideDetailScreen = ({
   >([]);
   const routeDetailMapRef = useRef<RouteMapViewRef | null>(null);
   const routeDetailOverlayRequestRef = useRef(0);
+  const [routeDetailLivePathCoordinates, setRouteDetailLivePathCoordinates] = useState<RouteCoordinate[] | null>(null);
+
+  const routeLookupPoints = normalizeRoutePoints(ride?.routePoints);
+  const {
+    startPoint: routeLookupStartPoint,
+    endPoint: routeLookupEndPoint,
+    stopPoints: routeLookupStopPoints
+  } = splitRoutePointRoles(routeLookupPoints);
+  const routeLookupStartLabel = ride?.startLocation?.trim() ?? '';
+  const routeLookupEndLabel = ride?.endLocation?.trim() ?? '';
+  const resolvedRouteLookupStartPoint = routeLookupStartPoint ?? parseCoordinateLabelPoint(ride?.startLocation ?? '');
+  const resolvedRouteLookupEndPoint = routeLookupEndPoint ?? parseCoordinateLabelPoint(ride?.endLocation ?? '');
+  const routeLookupStopsKey = routeLookupStopPoints.map((point) => `${point.lat}:${point.lng}`).join('|');
+
+  useEffect(() => {
+    if (!ride) {
+      setRouteDetailLivePathCoordinates(null);
+      return;
+    }
+
+    const startLabel = routeLookupStartLabel;
+    const endLabel = routeLookupEndLabel;
+    if (!startLabel || !endLabel) {
+      setRouteDetailLivePathCoordinates(null);
+      return;
+    }
+
+    let isCanceled = false;
+    (async () => {
+      try {
+        const pathCoordinates = await fetchGoogleDirectionsPathCoordinates({
+          startLabel,
+          endLabel,
+          startPoint: resolvedRouteLookupStartPoint,
+          endPoint: resolvedRouteLookupEndPoint,
+          intermediatePoints: routeLookupStopPoints,
+          apiKey: GOOGLE_PLACES_KEY
+        });
+        if (isCanceled) return;
+        setRouteDetailLivePathCoordinates(pathCoordinates);
+      } catch {
+        if (!isCanceled) {
+          setRouteDetailLivePathCoordinates(null);
+        }
+      }
+    })();
+
+    return () => {
+      isCanceled = true;
+    };
+  }, [
+    ride?.id,
+    routeLookupEndLabel,
+    routeLookupStartLabel,
+    routeLookupStopsKey,
+    resolvedRouteLookupEndPoint?.lat,
+    resolvedRouteLookupEndPoint?.lng,
+    resolvedRouteLookupStartPoint?.lat,
+    resolvedRouteLookupStartPoint?.lng
+  ]);
 
   if (!ride) return null;
 
@@ -6014,6 +6074,8 @@ export const RideDetailScreen = ({
   } = splitRoutePointRoles(routePoints);
   const startCheckpoint = routePoints[0] ?? null;
   const routeCoordinates = toRouteCoordinates(routePoints);
+  const routeMapPolylineCoordinates =
+    routeDetailLivePathCoordinates && routeDetailLivePathCoordinates.length > 1 ? routeDetailLivePathCoordinates : routeCoordinates;
   const routeMapMarkerLabels = routePoints.map((point, index) => {
     const isStart = index === 0;
     const isEnd = index === routePoints.length - 1;
@@ -6035,10 +6097,10 @@ export const RideDetailScreen = ({
   });
   const routeMapMarkerLabelKey = routeMapMarkerLabels.join('|');
   const routeMapKey = [
-    routeCoordinates.map((point) => `${point.latitude}:${point.longitude}`).join('|'),
+    routeMapPolylineCoordinates.map((point) => `${point.latitude}:${point.longitude}`).join('|'),
     routeMapMarkerLabelKey
   ].join('::');
-  const routeRegion = buildRouteRegion(routeCoordinates, {
+  const routeRegion = buildRouteRegion(routeMapPolylineCoordinates, {
     paddingScale: 1.04,
     paddingDelta: 0.015,
     minDelta: 0.008
@@ -6050,7 +6112,7 @@ export const RideDetailScreen = ({
     endPoint: explicitRouteEndPoint ?? parseCoordinateLabelPoint(ride.endLocation ?? ''),
     intermediatePoints: routeStopPoints
   });
-  const hasRouteMapSection = Boolean(routeDirectionsUrl) || routeCoordinates.length > 0;
+  const hasRouteMapSection = Boolean(routeDirectionsUrl) || routeMapPolylineCoordinates.length > 0;
   const hasRouteStats =
     typeof ride.routeEtaMinutes === 'number' || typeof ride.routeDistanceKm === 'number' || typeof ride.tollEstimateInr === 'number';
   const rideDateLabel = buildRideDateSummary(ride);
@@ -6112,10 +6174,10 @@ export const RideDetailScreen = ({
 
   const fitRouteDetailMapToBounds = () => {
     if (Platform.OS === 'web') return;
-    if (routeCoordinates.length < 2) return;
+    if (routeMapPolylineCoordinates.length < 2) return;
 
     requestAnimationFrame(() => {
-      routeDetailMapRef.current?.fitToCoordinates?.(routeCoordinates, {
+      routeDetailMapRef.current?.fitToCoordinates?.(routeMapPolylineCoordinates, {
         edgePadding: ROUTE_MAP_EDGE_PADDING,
         animated: false
       });
@@ -6408,7 +6470,7 @@ export const RideDetailScreen = ({
                         onPress={handleRouteMapPress}
                         mapPadding={ROUTE_MAP_PADDING}
                       >
-                        <routeMapModule.Polyline coordinates={routeCoordinates} strokeWidth={4} strokeColor={t.primary} />
+                        <routeMapModule.Polyline coordinates={routeMapPolylineCoordinates} strokeWidth={4} strokeColor={t.primary} />
                         {routeCoordinates.map((point, index) => {
                           const isStart = index === 0;
                           const isEnd = index === routeCoordinates.length - 1;
@@ -7487,6 +7549,20 @@ export const CreateSquadModal = ({
                       Request to Join
                     </Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.selectorChip,
+                      {
+                        borderColor: joinPermission === 'invite_only' ? t.primary : t.border,
+                        backgroundColor: joinPermission === 'invite_only' ? `${t.primary}22` : t.subtle
+                      }
+                    ]}
+                    onPress={() => setJoinPermission('invite_only')}
+                  >
+                    <Text style={[styles.selectorChipText, { color: joinPermission === 'invite_only' ? t.primary : t.muted }]}>
+                      Invite Only
+                    </Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -7618,11 +7694,47 @@ export const SquadDetailModal = ({
     const resolved = resolveUserForSquadId(memberId);
     return resolved ? [resolved] : [];
   });
-  const joinPermissionLabel = squad.joinPermission === 'request_to_join' ? 'Request approval' : 'Anyone can join';
+  const joinPermissionLabel =
+    squad.joinPermission === 'invite_only'
+      ? 'Invite only'
+      : squad.joinPermission === 'request_to_join'
+        ? 'Request approval'
+        : 'Anyone can join';
   const getMemberRole = (memberId: string): SquadRole => {
     if (memberId === squad.creatorId) return 'owner';
     if (squad.adminIds.includes(memberId)) return 'admin';
     return 'member';
+  };
+  const handleShareSquad = () => {
+    const details = [`Check out "${squad.name}" on ThrottleUp.`, squad.city ? `City: ${squad.city}` : null]
+      .filter(Boolean)
+      .join('\n');
+    void Share.share({
+      title: squad.name,
+      message: details
+    });
+  };
+  const openSquadActions = () => {
+    const actions: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [];
+    if (isOwner) {
+      actions.push({
+        text: 'Edit Squad',
+        onPress: () => onEditSquad(squad.id)
+      });
+      actions.push({
+        text: 'Delete Squad',
+        style: 'destructive',
+        onPress: () => onDeleteSquad(squad.id)
+      });
+    } else if (isMember || isPending) {
+      actions.push({
+        text: isPending ? 'Cancel Join Request' : 'Leave Squad',
+        style: 'destructive',
+        onPress: () => onLeaveSquad(squad.id)
+      });
+    }
+    actions.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Squad Actions', 'Manage this squad', actions);
   };
 
   return (
@@ -7634,10 +7746,10 @@ export const SquadDetailModal = ({
               <MaterialCommunityIcons name="arrow-left" size={20} color={t.text} />
             </TouchableOpacity>
             <View style={{ marginLeft: 'auto', flexDirection: 'row', gap: 12 }}>
-              <TouchableOpacity style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}>
+              <TouchableOpacity onPress={handleShareSquad} style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <MaterialCommunityIcons name="share-variant" size={20} color={t.text} />
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}>
+              <TouchableOpacity onPress={openSquadActions} style={[styles.iconButton, { borderColor: t.border, backgroundColor: t.subtle }]}>
                 <MaterialCommunityIcons name="dots-vertical" size={20} color={t.text} />
               </TouchableOpacity>
             </View>
@@ -7714,6 +7826,53 @@ export const SquadDetailModal = ({
               {squad.description}
             </Text>
 
+            {canManageRequests && (
+              <View style={{ marginBottom: 24, borderWidth: 1, borderColor: t.border, borderRadius: 12, padding: 12, backgroundColor: t.card }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: t.text }}>Join Requests</Text>
+                  <Text style={{ color: t.muted, fontSize: 12 }}>{requestUsers.length} pending</Text>
+                </View>
+                {requestUsers.length === 0 ? (
+                  <Text style={{ color: t.muted, fontSize: 13 }}>No pending requests right now.</Text>
+                ) : (
+                  requestUsers.map((requestUser) => (
+                    <View
+                      key={requestUser.id}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 10,
+                        borderWidth: 1,
+                        borderColor: t.border,
+                        borderRadius: 10,
+                        padding: 10,
+                        marginBottom: 8
+                      }}
+                    >
+                      <TouchableOpacity onPress={() => onViewProfile(requestUser.id)}>
+                        <Image source={{ uri: requestUser.avatar || avatarFallback }} style={{ width: 36, height: 36, borderRadius: 18 }} />
+                      </TouchableOpacity>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: t.text, fontWeight: '600' }} numberOfLines={1}>{requestUser.name}</Text>
+                      </View>
+                      <TouchableOpacity
+                        style={{ borderWidth: 1, borderColor: t.border, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10 }}
+                        onPress={() => onRejectJoinRequest(squad.id, requestUser.id)}
+                      >
+                        <Text style={{ color: t.muted, fontSize: 12, fontWeight: '600' }}>Decline</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{ borderWidth: 1, borderColor: t.primary, backgroundColor: t.primary, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 10 }}
+                        onPress={() => onAcceptJoinRequest(squad.id, requestUser.id)}
+                      >
+                        <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>Approve</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                )}
+              </View>
+            )}
+
             {/* Leadership Block */}
             <View style={{ marginBottom: 24 }}>
                <Text style={{ fontSize: 18, fontWeight: '600', color: t.text, marginBottom: 16 }}>Leadership</Text>
@@ -7728,20 +7887,48 @@ export const SquadDetailModal = ({
                      const member = resolveUserForSquadId(memberId);
                      if (!member) return null;
                      const handle = member.id.startsWith('user-') ? `${member.name.split(' ')[0]}${member.id.slice(-4)}` : member.id.slice(-6);
+                     const canManageMember = isOwner && member.id !== currentUser.id && member.id !== squad.creatorId;
+                     const roleLabel = role === 'owner' ? 'Owner' : role === 'admin' ? 'Admin' : null;
 
                      return (
-                        <TouchableOpacity key={memberId} style={{ alignItems: 'center', width: 80 }} onPress={() => onViewProfile(member.id)}>
-                           <View>
-                              <Image source={{ uri: member.avatar || avatarFallback }} style={{ width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: t.primary }} />
-                              {isLeader && (
-                                 <View style={{ position: 'absolute', bottom: -8, alignSelf: 'center', backgroundColor: t.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 }}>
-                                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: '600' }}>Admin</Text>
-                                 </View>
-                              )}
-                           </View>
-                           <Text style={{ fontSize: 13, color: t.text, textAlign: 'center', marginTop: 12 }} numberOfLines={1}>{member.name}</Text>
-                           <Text style={{ fontSize: 11, color: t.muted, textAlign: 'center', marginTop: 2 }} numberOfLines={1}>{handle}</Text>
-                        </TouchableOpacity>
+                        <View key={memberId} style={{ alignItems: 'center', width: 110 }}>
+                           <TouchableOpacity style={{ alignItems: 'center' }} onPress={() => onViewProfile(member.id)}>
+                             <View>
+                                <Image source={{ uri: member.avatar || avatarFallback }} style={{ width: 64, height: 64, borderRadius: 32, borderWidth: 2, borderColor: t.primary }} />
+                                {roleLabel && (
+                                   <View style={{ position: 'absolute', bottom: -8, alignSelf: 'center', backgroundColor: t.primary, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 }}>
+                                      <Text style={{ color: '#fff', fontSize: 10, fontWeight: '600' }}>{roleLabel}</Text>
+                                   </View>
+                                )}
+                             </View>
+                             <Text style={{ fontSize: 13, color: t.text, textAlign: 'center', marginTop: 12 }} numberOfLines={1}>{member.name}</Text>
+                             <Text style={{ fontSize: 11, color: t.muted, textAlign: 'center', marginTop: 2 }} numberOfLines={1}>{handle}</Text>
+                           </TouchableOpacity>
+                           {canManageMember && (
+                             <View style={{ marginTop: 8, width: '100%', gap: 6 }}>
+                               <TouchableOpacity
+                                 style={{ borderWidth: 1, borderColor: t.primary, borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}
+                                 onPress={() => {
+                                   if (role === 'admin') {
+                                     onDemoteAdmin(squad.id, member.id);
+                                     return;
+                                   }
+                                   onPromoteAdmin(squad.id, member.id);
+                                 }}
+                               >
+                                 <Text style={{ color: t.primary, fontSize: 11, fontWeight: '700' }}>
+                                   {role === 'admin' ? 'Demote Admin' : 'Promote Admin'}
+                                 </Text>
+                               </TouchableOpacity>
+                               <TouchableOpacity
+                                 style={{ borderWidth: 1, borderColor: '#ef4444', borderRadius: 8, paddingVertical: 5, alignItems: 'center' }}
+                                 onPress={() => onRemoveMember(squad.id, member.id)}
+                               >
+                                 <Text style={{ color: '#ef4444', fontSize: 11, fontWeight: '700' }}>Remove</Text>
+                               </TouchableOpacity>
+                             </View>
+                           )}
+                        </View>
                      );
                   })}
                </View>
@@ -7783,12 +7970,34 @@ export const SquadDetailModal = ({
         {/* Sticky Bottom Action Bar */}
         <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, backgroundColor: t.bg, borderTopWidth: 1, borderTopColor: t.border, paddingBottom: Math.max(insets.bottom, 16) }}>
            {isMember ? (
-              <TouchableOpacity style={[styles.primaryButton, { backgroundColor: t.primary, borderRadius: 24 }]} onPress={() => onOpenSquadChat(squad.id)}>
-                 <Text style={[styles.primaryButtonText, { fontSize: 16 }]}>Go To Chat</Text>
-              </TouchableOpacity>
+              <View style={{ gap: 10 }}>
+                <TouchableOpacity style={[styles.primaryButton, { backgroundColor: t.primary, borderRadius: 24 }]} onPress={() => onOpenSquadChat(squad.id)}>
+                   <Text style={[styles.primaryButtonText, { fontSize: 16 }]}>Go To Chat</Text>
+                </TouchableOpacity>
+                {!isOwner && (
+                  <TouchableOpacity
+                    style={[styles.primaryButton, { backgroundColor: t.subtle, borderRadius: 24, borderWidth: 1, borderColor: t.border }]}
+                    onPress={() => onLeaveSquad(squad.id)}
+                  >
+                     <Text style={[styles.primaryButtonText, { color: '#ef4444', fontSize: 15 }]}>Leave Squad</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
            ) : isPending ? (
+              <View style={{ gap: 10 }}>
+                <View style={[styles.primaryButton, { backgroundColor: t.subtle, borderRadius: 24 }]}>
+                   <Text style={[styles.primaryButtonText, { color: t.muted, fontSize: 16 }]}>Request Sent</Text>
+                </View>
+                <TouchableOpacity
+                  style={[styles.primaryButton, { backgroundColor: t.bg, borderRadius: 24, borderWidth: 1, borderColor: t.border }]}
+                  onPress={() => onLeaveSquad(squad.id)}
+                >
+                   <Text style={[styles.primaryButtonText, { color: '#ef4444', fontSize: 15 }]}>Cancel Request</Text>
+                </TouchableOpacity>
+              </View>
+           ) : squad.joinPermission === 'invite_only' ? (
               <View style={[styles.primaryButton, { backgroundColor: t.subtle, borderRadius: 24 }]}>
-                 <Text style={[styles.primaryButtonText, { color: t.muted, fontSize: 16 }]}>Request Sent</Text>
+                 <Text style={[styles.primaryButtonText, { color: t.muted, fontSize: 16 }]}>Invite Only</Text>
               </View>
            ) : (
               <TouchableOpacity style={[styles.primaryButton, { backgroundColor: t.primary, borderRadius: 24 }]} onPress={() => onJoinSquad(squad.id)}>

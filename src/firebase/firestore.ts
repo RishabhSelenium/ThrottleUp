@@ -42,7 +42,7 @@ const HELP_COLLECTION = 'helpPosts';
 const SQUADS_COLLECTION = 'squads';
 const MODERATION_REPORTS_COLLECTION = 'moderationReports';
 const RIDE_VISIBILITY_OPTIONS: RideVisibility[] = ['Nearby', 'City', 'Friends'];
-const SQUAD_JOIN_PERMISSION_OPTIONS: SquadJoinPermission[] = ['anyone', 'request_to_join'];
+const SQUAD_JOIN_PERMISSION_OPTIONS: SquadJoinPermission[] = ['anyone', 'request_to_join', 'invite_only'];
 const SQUAD_RIDE_CREATE_PERMISSION_OPTIONS: SquadRideCreatePermission[] = ['anyone', 'admin'];
 const RIDE_JOIN_PERMISSION_OPTIONS: RideJoinPermission[] = ['anyone', 'request_to_join'];
 

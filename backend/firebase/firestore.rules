@@ -189,6 +189,30 @@ service cloud.firestore {
         );
     }
 
+    function canAddOwnRideRequest() {
+      return request.auth.uid != resource.data.creatorId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requests']) &&
+        request.resource.data.currentParticipants == resource.data.currentParticipants &&
+        resource.data.requests is list &&
+        request.resource.data.requests is list &&
+        !resource.data.requests.hasAny([request.auth.uid]) &&
+        request.resource.data.requests.hasAll(resource.data.requests) &&
+        request.resource.data.requests.hasAll([request.auth.uid]) &&
+        request.resource.data.requests.size() == resource.data.requests.size() + 1;
+    }
+
+    function canWithdrawOwnRideRequest() {
+      return request.auth.uid != resource.data.creatorId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requests']) &&
+        request.resource.data.currentParticipants == resource.data.currentParticipants &&
+        resource.data.requests is list &&
+        request.resource.data.requests is list &&
+        resource.data.requests.hasAny([request.auth.uid]) &&
+        resource.data.requests.hasAll(request.resource.data.requests) &&
+        !request.resource.data.requests.hasAny([request.auth.uid]) &&
+        request.resource.data.requests.size() == resource.data.requests.size() - 1;
+    }
+
     function validHelpPost(data, postId) {
       return data.keys().hasAll([
           'id',
@@ -280,10 +304,80 @@ service cloud.firestore {
         (data.rideStyle == null || data.rideStyle is string) &&
         data.rideStyles is list &&
         data.rideStyles.size() > 0 &&
-        (data.joinPermission == 'anyone' || data.joinPermission == 'request_to_join') &&
+        (
+          data.joinPermission == 'anyone' ||
+          data.joinPermission == 'request_to_join' ||
+          data.joinPermission == 'invite_only'
+        ) &&
         (data.rideCreatePermission == 'anyone' || data.rideCreatePermission == 'admin') &&
         data.joinRequests is list &&
         data.createdAt is string;
+    }
+
+    function isSquadAdmin() {
+      return resource.data.adminIds is list &&
+        resource.data.adminIds.hasAny([request.auth.uid]);
+    }
+
+    function canSelfJoinOpenSquad() {
+      return request.auth.uid != resource.data.creatorId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
+        request.resource.data.joinPermission == 'anyone' &&
+        request.resource.data.adminIds == resource.data.adminIds &&
+        request.resource.data.joinRequests == resource.data.joinRequests &&
+        !resource.data.members.hasAny([request.auth.uid]) &&
+        request.resource.data.members.hasAll(resource.data.members) &&
+        request.resource.data.members.hasAll([request.auth.uid]) &&
+        request.resource.data.members.size() == resource.data.members.size() + 1;
+    }
+
+    function canAddOwnSquadJoinRequest() {
+      return request.auth.uid != resource.data.creatorId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinRequests']) &&
+        request.resource.data.joinPermission == 'request_to_join' &&
+        request.resource.data.members == resource.data.members &&
+        request.resource.data.adminIds == resource.data.adminIds &&
+        !resource.data.joinRequests.hasAny([request.auth.uid]) &&
+        request.resource.data.joinRequests.hasAll(resource.data.joinRequests) &&
+        request.resource.data.joinRequests.hasAll([request.auth.uid]) &&
+        request.resource.data.joinRequests.size() == resource.data.joinRequests.size() + 1;
+    }
+
+    function canWithdrawOwnSquadJoinRequest() {
+      return request.auth.uid != resource.data.creatorId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinRequests']) &&
+        request.resource.data.members == resource.data.members &&
+        request.resource.data.adminIds == resource.data.adminIds &&
+        resource.data.joinRequests.hasAny([request.auth.uid]) &&
+        resource.data.joinRequests.hasAll(request.resource.data.joinRequests) &&
+        !request.resource.data.joinRequests.hasAny([request.auth.uid]) &&
+        request.resource.data.joinRequests.size() == resource.data.joinRequests.size() - 1;
+    }
+
+    function canSelfLeaveSquad() {
+      return request.auth.uid != resource.data.creatorId &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'adminIds']) &&
+        resource.data.members.hasAny([request.auth.uid]) &&
+        !request.resource.data.members.hasAny([request.auth.uid]) &&
+        resource.data.members.hasAll(request.resource.data.members) &&
+        request.resource.data.members.size() == resource.data.members.size() - 1 &&
+        request.resource.data.joinRequests == resource.data.joinRequests &&
+        (
+          request.resource.data.adminIds == resource.data.adminIds ||
+          (
+            resource.data.adminIds is list &&
+            resource.data.adminIds.hasAny([request.auth.uid]) &&
+            !request.resource.data.adminIds.hasAny([request.auth.uid]) &&
+            resource.data.adminIds.hasAll(request.resource.data.adminIds) &&
+            request.resource.data.adminIds.size() == resource.data.adminIds.size() - 1
+          )
+        );
+    }
+
+    function canAdminManageSquadMembers() {
+      return isSquadAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'joinRequests']) &&
+        request.resource.data.adminIds == resource.data.adminIds;
     }
 
     function validModerationReport(data, reportId) {
@@ -353,9 +447,8 @@ service cloud.firestore {
             request.resource.data.requests is list
           ) ||
           (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['requests']) &&
-            request.resource.data.currentParticipants == resource.data.currentParticipants &&
-            request.resource.data.requests is list
+            canAddOwnRideRequest() ||
+            canWithdrawOwnRideRequest()
           ) ||
           (
             request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -408,16 +501,11 @@ service cloud.firestore {
         request.resource.data.createdAt == resource.data.createdAt &&
         (
           request.auth.uid == resource.data.creatorId ||
-          (
-            resource.data.adminIds is list &&
-            resource.data.adminIds.hasAny([request.auth.uid])
-          ) ||
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'adminIds', 'joinRequests']) ||
-          (
-            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['joinRequests']) &&
-            request.resource.data.members == resource.data.members &&
-            request.resource.data.adminIds == resource.data.adminIds
-          )
+          canAdminManageSquadMembers() ||
+          canSelfJoinOpenSquad() ||
+          canAddOwnSquadJoinRequest() ||
+          canWithdrawOwnSquadJoinRequest() ||
+          canSelfLeaveSquad()
         );
 
       allow delete: if isSignedIn() && resource.data.creatorId == request.auth.uid;
